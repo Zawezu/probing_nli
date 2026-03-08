@@ -5,14 +5,16 @@ DATA_FOLDER = "data"
 SICK_EN_FOLDER = "sick_en"
 SICK_EN_FILE = "SICK_annotated.txt"
 
-
 sick_filepaths = {"en": f"./{DATA_FOLDER}/{SICK_EN_FOLDER}/{SICK_EN_FILE}",
                   "es": "unavailable"}
 
 class SICKDataset(Dataset):
+    label_map = {"entailment": 0, "neutral": 1, "contradiction": 2}
+
     def __init__(self, language, split):
-        self.sentence_pairs = {}
-        self.labels = {}
+        self.sentence_pairs = []
+        self.labels = []
+        self.original_ids = []
         filepath = sick_filepaths[language]
 
         self.load_sick_dataset(filepath, split)
@@ -50,10 +52,21 @@ class SICKDataset(Dataset):
                 # sentence_B_datase = data[13]
                 label = data[7].lower()
                 
-                self.sentence_pairs[pair_ID] = (sentence_A, sentence_B)
-                self.labels[pair_ID] = label
+                self.sentence_pairs.append((sentence_A, sentence_B))
+                self.labels.append(self.label_map[label])
+                self.original_ids.append(pair_ID)
             
     def __getitem__(self, index):
         return self.sentence_pairs[index], self.labels[index]
+
+    def __len__(self):
+        return len(self.sentence_pairs)
     
 
+def get_dataset_and_dataloader(language, split):
+    dataset = SICKDataset(language, split)
+
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+
+    return dataset, dataloader
+    

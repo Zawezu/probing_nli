@@ -1,1 +1,4 @@
 models/*_model/**
+data/activations/*_model/**
+
+huggingface_key.txt
