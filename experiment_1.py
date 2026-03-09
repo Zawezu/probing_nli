@@ -1,4 +1,6 @@
 # from sick_loader import get_dataset_and_dataloader
+from typing import Literal
+
 from activations_generator import ActivationLoader
 
 # from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -14,9 +16,11 @@ from sklearn.linear_model import LogisticRegression
 # )  # Hooking utilities
 # from transformer_lens import HookedTransformer, FactoredMatrix
 
+device: Literal["cuda", "cpu"] = "cuda" if t.cuda.is_available() else "cpu"
+
 
 class LRProbe(t.nn.Module):
-    def __init__(self, d_in, scaler_mean, scaler_scale):
+    def __init__(self, d_in, scaler_mean, scaler_scale) -> None:
         super().__init__()
         self.net = t.nn.Sequential(
             t.nn.Linear(d_in, 3, bias=False), t.nn.Softmax(dim=-1)
@@ -29,15 +33,15 @@ class LRProbe(t.nn.Module):
             return (x - self.scaler_mean) / self.scaler_scale
         return x
 
-    def forward(self, x):
+    def forward(self, x) -> t.Tensor:
         return self.net(self._normalize(x))
 
-    def pred(self, x):
-        logits = self.forward(x)
+    def pred(self, x) -> t.Tensor:
+        logits: t.Tensor = self.forward(x)
         return t.argmax(logits, dim=-1)
 
     @staticmethod
-    def from_data(acts, labels, C=0.1, device="cpu"):
+    def from_data(acts, labels, C=0.1, device="cpu") -> "LRProbe":
         X = acts.cpu().float().numpy()
         y = labels.cpu().float().numpy()
 
@@ -53,20 +57,23 @@ class LRProbe(t.nn.Module):
         )
         lr_model.fit(X_scaled, y)
 
-        scaler_mean = t.tensor(scaler.mean_, dtype=t.float32)
-        scaler_scale = t.tensor(scaler.scale_, dtype=t.float32)
+        scaler_mean: t.Tensor = t.tensor(scaler.mean_, dtype=t.float32)
+        scaler_scale: t.Tensor = t.tensor(scaler.scale_, dtype=t.float32)
 
-        probe = LRProbe(acts.shape[-1], scaler_mean, scaler_scale).to(device)
+        probe: LRProbe = LRProbe(acts.shape[-1], scaler_mean, scaler_scale).to(device)
 
         probe.net[0].weight.data = t.tensor(lr_model.coef_, dtype=t.float32).to(device)
 
         return probe
 
 
-if __name__ == "__main__":
-    device = "cuda" if t.cuda.is_available() else "cpu"
+def get_accuracy(preds: t.Tensor, labels: t.Tensor) -> float:
+    return (preds == labels).float().mean().item()
 
+
+if __name__ == "__main__":
     language = "en"
+    control = True
 
     olmo_activation_loader = ActivationLoader("olmo_model")
 
@@ -74,22 +81,23 @@ if __name__ == "__main__":
         print(f"Probing at layer {layer_number}")
 
         train_acts, train_labels = olmo_activation_loader.load_activations(
-            language, "train", layer_number
+            language, "train", layer_number, control=control
         )
 
         lr_probe = LRProbe.from_data(train_acts, train_labels, device="cpu")
 
         # Train accuracy
-        train_preds = lr_probe.pred(train_acts)
+        train_preds: t.Tensor = lr_probe.pred(train_acts)
         # print(f"Train predictions:\n{train_preds}")
         # print(f"Train labels:\n{train_labels}")
-        train_acc = (train_preds == train_labels).float().mean().item()
+        train_acc: float = get_accuracy(train_preds, train_labels)
+
         print(f"Train accuracy: {train_acc}")
 
         # Test accuracy
         test_acts, test_labels = olmo_activation_loader.load_activations(
-            language, "test", layer_number
+            language, "test", layer_number, control=control
         )
-        test_preds = lr_probe.pred(test_acts)
-        test_acc = (test_preds == test_labels).float().mean().item()
+        test_preds: t.Tensor = lr_probe.pred(test_acts)
+        test_acc: float = get_accuracy(test_preds, test_labels)
         print(f"Test accuracy: {test_acc}")

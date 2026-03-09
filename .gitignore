@@ -5,3 +5,5 @@ huggingface_key.txt
 activations_generator.py
 
 data/sick/SICK_merged.json
+
+__pycache__/

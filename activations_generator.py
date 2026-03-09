@@ -14,12 +14,12 @@ MODEL_FILEPATHS: dict[str, str] = {"olmo_model": f"./{MODEL_FOLDER}/olmo_model"}
 ACTIVATIONS_PATH = "./data/activations/"
 
 # global device so that methods can refer to it
-device: Literal["cuda"] | Literal["cpu"] = "cuda" if t.cuda.is_available() else "cpu"
+device: Literal["cuda", "cpu"] = "cuda" if t.cuda.is_available() else "cpu"
 
 
 class ActivationLoader:
     def __init__(self, model_name, tokenizer=None, hf_model=None) -> None:
-        self.activations = {}
+        self.activations: dict[str, t.Tensor] = {}
         self.model_name: str = model_name
 
         self.tokenizer = tokenizer
@@ -38,7 +38,8 @@ class ActivationLoader:
     def _save_batch(
         self,
         acts_by_layer: dict,
-        labels: list,
+        labels: list[int],
+        control_labels: list[int],
         language: str,
         split: str,
         batch_id: int,
@@ -47,9 +48,11 @@ class ActivationLoader:
         for layer_num, acts in acts_by_layer.items():
             X: t.Tensor = t.stack(acts)
             y: t.Tensor = t.tensor(labels)
+            y2: t.Tensor = t.tensor(control_labels)
             data_to_save = {
                 "activations": X,
                 "labels": y,
+                "control_labels": y2,
                 "metadata": {
                     "layer": layer_num,
                     "model": self.model_name,
@@ -77,8 +80,8 @@ class ActivationLoader:
         start_index: int = 0,
     ) -> None:
         """
-        Iterate through `dataloader` in batches of `batch_size`, saving each batch.
-        `start_index` can be used to skip the first N examples so that you can resume
+        Iterate through `dataloader` in batches, processing all sentences in each batch together.
+        `start_index` can be used to skip the first N batches so that you can resume
         after a crash.
 
         `amount_to_generate` limits the number of examples produced *after* the start
@@ -92,7 +95,9 @@ class ActivationLoader:
 
         assert self.tokenizer is not None and self.hf_model is not None
 
-        _, dataloader = get_dataset_and_dataloader(language, split)
+        _, dataloader = get_dataset_and_dataloader(
+            language, split, batch_size=batch_size
+        )
         n_layers = len(self.hf_model.model.layers)
 
         # register hooks
@@ -104,44 +109,67 @@ class ActivationLoader:
             hook_handles.append(handle)
 
         processed = 0  # number of examples seen after start_index
-        batch_id: int = start_index // batch_size
-        batch_acts_by_layer = {i: [] for i in range(n_layers)}
-        batch_labels = []
+        batch_id: int = start_index
+        batch_acts_by_layer: dict[int, list[t.Tensor]] = {
+            i: [] for i in range(n_layers)
+        }
+        batch_labels: list[int] = []
+        batch_control_labels: list[int] = []
 
         len_dataloader = len(dataloader)
         try:
-            for i, ((sentence_a, sentence_b), label, _) in tqdm(
+            for batch_num, (
+                (sentence_a_batch, sentence_b_batch),
+                label_batch,
+                control_label_batch,
+                _,
+            ) in tqdm(
                 enumerate(dataloader),
                 desc="Extracting all layers",
                 total=len_dataloader,
             ):
-                if i < start_index:  # skip until we reach the resume point
+                if batch_num < start_index:  # skip until we reach the resume point
                     continue
 
-                prompt: str = f"Premise: {sentence_a} Hypothesis: {sentence_b} Label:"
-                tokens = self.tokenizer(prompt, return_tensors="pt").to(device)
+                # Create prompts for all sentences in the batch
+                prompts: list[str] = [
+                    f"Premise: {sent_a} Hypothesis: {sent_b} Label:"
+                    for sent_a, sent_b in zip(sentence_a_batch, sentence_b_batch)
+                ]
+
+                # Tokenize entire batch at once
+                tokens = self.tokenizer(prompts, return_tensors="pt", padding=True).to(
+                    device
+                )
 
                 with t.no_grad():
                     self.hf_model(**tokens)
 
+                # Extract activations for all samples in the batch
                 for layer_number in range(n_layers):
-                    act = self.activations[f"layer_{layer_number}"][0, -1, :].cpu()
-                    batch_acts_by_layer[layer_number].append(act)
+                    acts: t.Tensor = self.activations[f"layer_{layer_number}"][
+                        :, -1, :
+                    ].cpu()
+                    batch_acts_by_layer[layer_number].extend(acts)
 
-                batch_labels.append(label)
-                processed += 1
+                batch_labels.extend(label_batch.tolist())
+                batch_control_labels.extend(control_label_batch.tolist())
+                processed += len(label_batch)
 
-                # flush a batch when full or when we hit the amount_to_generate limit
-                if (processed % batch_size == 0) or (
-                    amount_to_generate and processed == amount_to_generate
-                ):
-                    if save_to_disk:
-                        self._save_batch(
-                            batch_acts_by_layer, batch_labels, language, split, batch_id
-                        )
-                    batch_id += 1
-                    batch_acts_by_layer = {i: [] for i in range(n_layers)}
-                    batch_labels = []
+                # Save batch and reset
+                if save_to_disk:
+                    self._save_batch(
+                        batch_acts_by_layer,
+                        batch_labels,
+                        batch_control_labels,
+                        language,
+                        split,
+                        batch_id,
+                    )
+                batch_id += 1
+                batch_acts_by_layer = {i: [] for i in range(n_layers)}
+                batch_labels = []
+                batch_control_labels = []
 
                 if amount_to_generate and processed >= amount_to_generate:
                     break
@@ -149,13 +177,19 @@ class ActivationLoader:
             for handle in hook_handles:
                 handle.remove()
 
-    def load_activations(self, language: str, split: str, layer_number: int):
+    def load_activations(
+        self, language: str, split: str, layer_number: int, control: bool
+    ) -> tuple[t.Tensor, t.Tensor]:
         """Load activations and labels for a specific layer."""
         save_path = (
             f"{ACTIVATIONS_PATH}/{self.model_name}/{language}/{split}/{layer_number}.pt"
         )
         data = t.load(save_path)
-        return data["activations"], data["labels"]
+
+        if control:
+            return data["activations"], data["control_labels"]
+        else:
+            return data["activations"], data["labels"]
 
     def load_model(self) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -186,7 +220,7 @@ if __name__ == "__main__":
     model_name = "olmo_model"
     language = "es"
 
-    activation_loader = ActivationLoader(model_name)
+    activation_loader: ActivationLoader = ActivationLoader(model_name)
 
     for language in ["en", "es"]:
         # example: start at 256th example, batch size 128
@@ -217,4 +251,4 @@ if __name__ == "__main__":
             start_index=0,
         )
 
-        print(activation_loader.load_activations(language, "train", 1))
+        print(activation_loader.load_activations(language, "train", 1, control=False))
