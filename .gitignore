@@ -1,4 +1,7 @@
-models/*_model/**
-data/activations/*_model/**
+models/
+data/activations/
 
 huggingface_key.txt
+activations_generator.py
+
+data/sick/SICK_merged.json

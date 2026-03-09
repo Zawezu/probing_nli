@@ -66,13 +66,15 @@ class LRProbe(t.nn.Module):
 if __name__ == "__main__":
     device = "cuda" if t.cuda.is_available() else "cpu"
 
+    language = "en"
+
     olmo_activation_loader = ActivationLoader("olmo_model")
 
     for layer_number in range(olmo_activation_loader.get_number_of_layers()):
         print(f"Probing at layer {layer_number}")
 
         train_acts, train_labels = olmo_activation_loader.load_activations(
-            "train", layer_number
+            language, "train", layer_number
         )
 
         lr_probe = LRProbe.from_data(train_acts, train_labels, device="cpu")
@@ -86,7 +88,7 @@ if __name__ == "__main__":
 
         # Test accuracy
         test_acts, test_labels = olmo_activation_loader.load_activations(
-            "test", layer_number
+            language, "test", layer_number
         )
         test_preds = lr_probe.pred(test_acts)
         test_acc = (test_preds == test_labels).float().mean().item()
