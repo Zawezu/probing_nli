@@ -37,7 +37,7 @@ class ActivationLoader:
 
     def _save_batch(
         self,
-        acts_by_layer: dict,
+        acts_by_layer: dict[int, t.Tensor],
         labels: list[int],
         control_labels: list[int],
         language: str,
@@ -46,20 +46,21 @@ class ActivationLoader:
     ) -> None:
         """write a single batch of activations/labels for every layer."""
         for layer_num, acts in acts_by_layer.items():
-            X: t.Tensor = t.stack(acts)
-            y: t.Tensor = t.tensor(labels)
-            y2: t.Tensor = t.tensor(control_labels)
-            data_to_save = {
-                "activations": X,
-                "labels": y,
-                "control_labels": y2,
+            labels_tensor: t.Tensor = t.tensor(labels)
+            control_labels_tensor: t.Tensor = t.tensor(control_labels)
+            print(acts)
+            print(acts.shape)
+            data_to_save: dict[str, t.Tensor | dict[str, int | str]] = {
+                "activations": acts,
+                "labels": labels_tensor,
+                "control_labels": control_labels_tensor,
                 "metadata": {
                     "layer": layer_num,
                     "model": self.model_name,
                     "batch_id": batch_id,
                 },
             }
-            save_path: str = f"{ACTIVATIONS_PATH}/{self.model_name}/{language}/{split}/{layer_num}.pt"
+            save_path: str = f"{ACTIVATIONS_PATH}/{self.model_name}/{language}/{split}/batch{batch_id}_layer{layer_num}.pt"
 
             # If the folder doesn't exist, create it
             path_obj = Path(save_path)
@@ -102,26 +103,21 @@ class ActivationLoader:
 
         # register hooks
         hook_handles = []
-        for layer_number in range(n_layers):
-            handle = self.hf_model.model.layers[layer_number].register_forward_hook(
-                self.get_activation(f"layer_{layer_number}")
+        for layer_num in range(n_layers):
+            handle = self.hf_model.model.layers[layer_num].register_forward_hook(
+                self.get_activation(f"layer_{layer_num}")
             )
             hook_handles.append(handle)
 
         processed = 0  # number of examples seen after start_index
         batch_id: int = start_index
-        batch_acts_by_layer: dict[int, list[t.Tensor]] = {
-            i: [] for i in range(n_layers)
-        }
-        batch_labels: list[int] = []
-        batch_control_labels: list[int] = []
 
         len_dataloader = len(dataloader)
         try:
             for batch_num, (
                 (sentence_a_batch, sentence_b_batch),
-                label_batch,
-                control_label_batch,
+                batch_labels,
+                batch_control_labels,
                 _,
             ) in tqdm(
                 enumerate(dataloader),
@@ -130,6 +126,8 @@ class ActivationLoader:
             ):
                 if batch_num < start_index:  # skip until we reach the resume point
                     continue
+
+                batch_acts_by_layer: dict[int, t.Tensor] = {}
 
                 # Create prompts for all sentences in the batch
                 prompts: list[str] = [
@@ -146,15 +144,17 @@ class ActivationLoader:
                     self.hf_model(**tokens)
 
                 # Extract activations for all samples in the batch
-                for layer_number in range(n_layers):
-                    acts: t.Tensor = self.activations[f"layer_{layer_number}"][
+                for layer_num in range(n_layers):
+                    acts: t.Tensor = self.activations[f"layer_{layer_num}"][
                         :, -1, :
                     ].cpu()
-                    batch_acts_by_layer[layer_number].extend(acts)
 
-                batch_labels.extend(label_batch.tolist())
-                batch_control_labels.extend(control_label_batch.tolist())
-                processed += len(label_batch)
+                    batch_acts_by_layer[layer_num] = acts
+
+                print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
+                print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
+
+                processed += len(batch_labels)
 
                 # Save batch and reset
                 if save_to_disk:
@@ -167,9 +167,6 @@ class ActivationLoader:
                         batch_id,
                     )
                 batch_id += 1
-                batch_acts_by_layer = {i: [] for i in range(n_layers)}
-                batch_labels = []
-                batch_control_labels = []
 
                 if amount_to_generate and processed >= amount_to_generate:
                     break
@@ -178,12 +175,16 @@ class ActivationLoader:
                 handle.remove()
 
     def load_activations(
-        self, language: str, split: str, layer_number: int, control: bool
+        self,
+        language: str,
+        split: str,
+        layer_num: int,
+        control: bool,
+        batch_id=0,  # !!! batch_id here is temporary
     ) -> tuple[t.Tensor, t.Tensor]:
         """Load activations and labels for a specific layer."""
-        save_path = (
-            f"{ACTIVATIONS_PATH}/{self.model_name}/{language}/{split}/{layer_number}.pt"
-        )
+        save_path = f"{ACTIVATIONS_PATH}/{self.model_name}/{language}/{split}/batch{batch_id}_layer{layer_num}.pt"
+        print(f"Loading activations from {save_path}")
         data = t.load(save_path)
 
         if control:
@@ -214,41 +215,56 @@ class ActivationLoader:
 
 if __name__ == "__main__":
     save_to_disk = True
-    amount_to_generate = 64
-    batch_size = 32
+    generate = False
+    amount_to_generate = 2
+    batch_size = 2
 
     model_name = "olmo_model"
-    language = "es"
+    # languages_generated = ["en", "es"]
+    languages_generated = ["en"]
 
     activation_loader: ActivationLoader = ActivationLoader(model_name)
 
-    for language in ["en", "es"]:
-        # example: start at 256th example, batch size 128
-        activation_loader.generate_activations(
-            language,
-            "train",
-            save_to_disk=save_to_disk,
-            amount_to_generate=amount_to_generate,
-            batch_size=batch_size,
-            start_index=0,
-        )
+    if generate:
+        for language in languages_generated:
+            # example: start at 256th example, batch size 128
+            activation_loader.generate_activations(
+                language,
+                "train",
+                save_to_disk=save_to_disk,
+                amount_to_generate=amount_to_generate,
+                batch_size=batch_size,
+                start_index=0,
+            )
 
-        activation_loader.generate_activations(
-            language,
-            "test",
-            save_to_disk=save_to_disk,
-            amount_to_generate=amount_to_generate,
-            batch_size=batch_size,
-            start_index=0,
-        )
+            activation_loader.generate_activations(
+                language,
+                "test",
+                save_to_disk=save_to_disk,
+                amount_to_generate=amount_to_generate,
+                batch_size=batch_size,
+                start_index=0,
+            )
 
-        activation_loader.generate_activations(
-            language,
-            "val",
-            save_to_disk=save_to_disk,
-            amount_to_generate=amount_to_generate,
-            batch_size=batch_size,
-            start_index=0,
-        )
+            activation_loader.generate_activations(
+                language,
+                "val",
+                save_to_disk=save_to_disk,
+                amount_to_generate=amount_to_generate,
+                batch_size=batch_size,
+                start_index=0,
+            )
 
-        print(activation_loader.load_activations(language, "train", 1, control=False))
+    # Sanity check: just print some activations for the first 3 layers
+    split_shown = "train"
+    batch_id = 0
+    for language in languages_generated:
+        for layer in range(3):
+            loaded_activations = activation_loader.load_activations(
+                language, split_shown, layer, control=False, batch_id=batch_id
+            )
+            print(
+                f"Language: {language}, split shown: {split_shown}. Layer: {layer}. Batch: {batch_id}"
+            )
+            print(loaded_activations)
+            print(loaded_activations[0].size())
