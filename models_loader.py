@@ -1,6 +1,5 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
-MODEL_FOLDER = "models"
+from common_constants import MODEL_FOLDER
 
 
 if __name__ == "__main__":

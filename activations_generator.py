@@ -1,20 +1,15 @@
-from typing import Literal
-
-from sick_loader import get_dataset_and_dataloader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch as t
+from torch.utils.data import Dataset
+from torch import Tensor
 from tqdm import tqdm
-
 from pathlib import Path
 
-
-MODEL_FOLDER = "models"
-MODEL_FILEPATHS: dict[str, str] = {"olmo_model": f"./{MODEL_FOLDER}/olmo_model"}
-
-ACTIVATIONS_PATH = "./data/activations/"
+from sick_loader import get_dataset_and_dataloader
+from common_constants import ACTIVATIONS_PATH, MODEL_FILEPATHS
 
 # global device so that methods can refer to it
-device: Literal["cuda", "cpu"] = "cuda" if t.cuda.is_available() else "cpu"
+device = "cuda" if t.cuda.is_available() else "cpu"
 
 
 class ActivationLoader:
@@ -48,11 +43,11 @@ class ActivationLoader:
         for layer_num, acts in acts_by_layer.items():
             labels_tensor: t.Tensor = t.tensor(labels)
             control_labels_tensor: t.Tensor = t.tensor(control_labels)
-            print(acts)
-            print(acts.shape)
+            # print(acts)
+            # print(acts.shape)
             data_to_save: dict[str, t.Tensor | dict[str, int | str]] = {
                 "activations": acts,
-                "labels": labels_tensor,
+                "standard_labels": labels_tensor,
                 "control_labels": control_labels_tensor,
                 "metadata": {
                     "layer": layer_num,
@@ -60,7 +55,9 @@ class ActivationLoader:
                     "batch_id": batch_id,
                 },
             }
-            save_path: str = f"{ACTIVATIONS_PATH}/{self.model_name}/{language}/{split}/batch{batch_id}_layer{layer_num}.pt"
+            save_path: str = get_activations_filepath(
+                self.model_name, language, split, layer_num, batch_id
+            )
 
             # If the folder doesn't exist, create it
             path_obj = Path(save_path)
@@ -151,8 +148,8 @@ class ActivationLoader:
 
                     batch_acts_by_layer[layer_num] = acts
 
-                print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
-                print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
+                # print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
+                # print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
 
                 processed += len(batch_labels)
 
@@ -173,24 +170,6 @@ class ActivationLoader:
         finally:
             for handle in hook_handles:
                 handle.remove()
-
-    def load_activations(
-        self,
-        language: str,
-        split: str,
-        layer_num: int,
-        control: bool,
-        batch_id=0,  # !!! batch_id here is temporary
-    ) -> tuple[t.Tensor, t.Tensor]:
-        """Load activations and labels for a specific layer."""
-        save_path = f"{ACTIVATIONS_PATH}/{self.model_name}/{language}/{split}/batch{batch_id}_layer{layer_num}.pt"
-        print(f"Loading activations from {save_path}")
-        data = t.load(save_path)
-
-        if control:
-            return data["activations"], data["control_labels"]
-        else:
-            return data["activations"], data["labels"]
 
     def load_model(self) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -213,15 +192,81 @@ class ActivationLoader:
                 return int(file.readline())
 
 
+class ActivationDataset(Dataset):
+    def __init__(
+        self,
+        language: str,
+        split: str,
+        layer_num: int,
+        probing_task: str,
+        model_name: str,
+    ) -> None:
+        self.language: str = language
+        self.split: str = split
+        self.layer_num: int = layer_num
+        self.probing_task: str = probing_task
+        self.model_name: str = model_name
+
+        self.activations, self.labels = self.load_activations()
+
+    def load_activations(self) -> tuple[Tensor, Tensor]:
+        """
+        Loads the tensors form the pt files of every batch and puts them into a single unified tensor
+        """
+        total_activations_list: list[Tensor] = []
+        total_labels_list: list[Tensor] = []
+
+        batch_id = 0
+        while True:
+            try:
+                activations_filepath: str = get_activations_filepath(
+                    self.model_name, self.language, self.split, self.layer_num, batch_id
+                )
+                data = t.load(activations_filepath)
+            except FileNotFoundError:
+                # print("No more batches found")
+                break
+
+            # print(f"Loaded activations from {activations_filepath}")
+
+            activations: Tensor = data["activations"]
+            labels: Tensor = data[f"{self.probing_task}_labels"]
+
+            # print(f"activations=\n{activations}\n----------")
+            # print(f"list(activations)=\n{list(activations)}\n----------")
+
+            # Convert tensors to lists of individual tensors and extend
+            total_activations_list.extend(list(activations))
+            total_labels_list.extend(list(labels))
+
+            batch_id += 1
+
+        return t.stack(total_activations_list, dim=0), t.stack(total_labels_list, dim=0)
+
+    def __getitem__(self, i) -> tuple[Tensor, Tensor]:
+        return self.activations[i], self.labels[i]
+
+    def __len__(self) -> int:
+        return len(self.activations)
+
+
+def get_activations_filepath(model_name, language, split, layer_num, batch_id) -> str:
+    return f"{ACTIVATIONS_PATH}/{model_name}/{language}/{split}/layer{layer_num}_batch{batch_id}.pt"
+
+
 if __name__ == "__main__":
     save_to_disk = True
-    generate = False
-    amount_to_generate = 2
-    batch_size = 2
+    generate = True
+    amount_to_generate = 256
+    batch_size = 64
 
     model_name = "olmo_model"
-    # languages_generated = ["en", "es"]
+    # languages_generated = LANGUAGES
     languages_generated = ["en"]
+
+    print(
+        f"save_to_disk={save_to_disk}\ngenerate={generate}\namount_to_generate={amount_to_generate}\nbatch_size={batch_size}\nmodel_name={model_name}\nlanguages_generated={languages_generated}"
+    )
 
     activation_loader: ActivationLoader = ActivationLoader(model_name)
 
@@ -255,16 +300,7 @@ if __name__ == "__main__":
                 start_index=0,
             )
 
-    # Sanity check: just print some activations for the first 3 layers
-    split_shown = "train"
-    batch_id = 0
-    for language in languages_generated:
-        for layer in range(3):
-            loaded_activations = activation_loader.load_activations(
-                language, split_shown, layer, control=False, batch_id=batch_id
-            )
-            print(
-                f"Language: {language}, split shown: {split_shown}. Layer: {layer}. Batch: {batch_id}"
-            )
-            print(loaded_activations)
-            print(loaded_activations[0].size())
+    activations_dataset = ActivationDataset("en", "train", 0, "standard", model_name)
+
+    for i in range(8):
+        print(f"{activations_dataset[i]}\n-----------------")
