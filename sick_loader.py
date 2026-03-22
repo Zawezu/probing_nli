@@ -88,8 +88,8 @@ class SICKDirtyDataset(Dataset):
                         self.labels.append(LABEL_MAP[label])
                         self.original_ids.append(pair_ID)
 
-    def __getitem__(self, index: int) -> tuple[tuple[str, str], int, int]:
-        return self.sentence_pairs[index], self.labels[index], self.original_ids[index]
+    def __getitem__(self, i: int) -> tuple[tuple[str, str], int, int]:
+        return self.sentence_pairs[i], self.labels[i], self.original_ids[i]
 
     def __len__(self) -> int:
         return len(self.sentence_pairs)
@@ -98,8 +98,7 @@ class SICKDirtyDataset(Dataset):
 class SICKMergedDataset(Dataset):
     def __init__(self, language, split) -> None:
         self.sentence_pairs: list[tuple[str, str]] = []
-        self.standard_labels: list[int] = []
-        self.control_labels: list[int] = []
+        self.labels: list[dict[str, int]] = []
         self.original_ids: list[int] = []
 
         self.load_dataset(language, split)
@@ -120,16 +119,24 @@ class SICKMergedDataset(Dataset):
                             (str(values["sentence_a_es"]), str(values["sentence_b_es"]))
                         )
 
-                self.standard_labels.append(int(values["standard_label"]))
-                self.control_labels.append(int(values["control_label"]))
+                self.labels.append(
+                    {
+                        "standard": int(values["standard_label"]),
+                        "control": int(values["control_label"]),
+                        "disjunct_control": int(values["disjunct_control_label"]),
+                    }
+                )
                 self.original_ids.append(int(id))
 
-    def __getitem__(self, index: int) -> tuple[tuple[str, str], int, int, int]:
+    def get_labels_in_range(self, start: int, end: int, probing_task: str) -> list[int]:
+        labels_selected: list[dict[str, int]] = self.labels[start:end]
+        return [x[probing_task] for x in labels_selected]
+
+    def __getitem__(self, i: int) -> tuple[tuple[str, str], dict[str, int], int]:
         return (
-            self.sentence_pairs[index],
-            self.standard_labels[index],
-            self.control_labels[index],
-            self.original_ids[index],
+            self.sentence_pairs[i],
+            self.labels[i],
+            self.original_ids[i],
         )
 
     def __len__(self) -> int:
@@ -138,10 +145,10 @@ class SICKMergedDataset(Dataset):
 
 def get_dataset_and_dataloader(
     language, split, batch_size=1
-) -> tuple[SICKMergedDataset, DataLoader[tuple[tuple[str, str], int, int, int]]]:
+) -> tuple[SICKMergedDataset, DataLoader[tuple[tuple[str, str], dict[str, int], int]]]:
     dataset: SICKMergedDataset = SICKMergedDataset(language, split)
 
-    dataloader: DataLoader[tuple[tuple[str, str], int, int, int]] = DataLoader(
+    dataloader: DataLoader[tuple[tuple[str, str], dict[str, int], int]] = DataLoader(
         dataset, batch_size=batch_size, shuffle=False
     )
 
@@ -164,8 +171,8 @@ def create_control_labels(dataset_dict, disjunct: bool, label_ratio=None) -> Non
     if label_ratio is None:
         amount_per_label: dict[int, int] = {label: 0 for label in unique_labels}
         for tup in dataset_dict.values():
-            label: int = tup["label"]
-            amount_per_label[label] += 1
+            standard_label: int = tup["standard_label"]
+            amount_per_label[standard_label] += 1
     else:
         amount_per_label = label_ratio
 
@@ -190,7 +197,7 @@ def create_control_labels(dataset_dict, disjunct: bool, label_ratio=None) -> Non
         # print(probabilities)
 
         for id, values in dataset_dict.items():
-            original_label: int = values["label"]
+            original_label: int = values["standard_label"]
             probabilities_used: list[float] = list(
                 probabilities[f"{original_label}_out"].values()
             )
@@ -213,7 +220,7 @@ def create_control_labels(dataset_dict, disjunct: bool, label_ratio=None) -> Non
             dataset_dict[id]["control_label"] = control_labels.pop(0)
 
 
-def create_merged_dataset() -> None:
+def create_merged_json() -> None:
     merged_dataset_dict: dict[str, dict[str, str | int]] = {}
 
     for language in LANGUAGES:
@@ -240,7 +247,7 @@ def create_merged_dataset() -> None:
                 add_to_dict(
                     merged_dataset_dict[id], f"sentence_b_{language}", sentence_b[0]
                 )
-                add_to_dict(merged_dataset_dict[id], "label", label.item())
+                add_to_dict(merged_dataset_dict[id], "standard_label", label.item())
                 add_to_dict(merged_dataset_dict[id], "split", split)
 
     create_control_labels(merged_dataset_dict, disjunct=False)
@@ -253,7 +260,7 @@ def create_merged_dataset() -> None:
 
 
 if __name__ == "__main__":
-    create_merged_dataset()
+    create_merged_json()
 
     # for language in LANGUAGES:
     #     print(language)

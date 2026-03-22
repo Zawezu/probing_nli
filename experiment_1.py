@@ -1,7 +1,7 @@
 # from sick_loader import get_dataset_and_dataloader
 from typing import Literal
 
-from activations_generator import ActivationLoader, ActivationDataset
+from activations_loader import ActivationLoader, ActivationDataset
 
 # from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch as t

@@ -1,11 +1,11 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch as t
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
 from tqdm import tqdm
 from pathlib import Path
 
-from sick_loader import get_dataset_and_dataloader
+from sick_loader import SICKMergedDataset
 from common_constants import ACTIVATIONS_PATH, MODEL_FILEPATHS
 
 # global device so that methods can refer to it
@@ -33,22 +33,14 @@ class ActivationLoader:
     def _save_batch(
         self,
         acts_by_layer: dict[int, t.Tensor],
-        labels: list[int],
-        control_labels: list[int],
         language: str,
         split: str,
         batch_id: int,
     ) -> None:
-        """write a single batch of activations/labels for every layer."""
+        """write a single batch of activations for every layer."""
         for layer_num, acts in acts_by_layer.items():
-            labels_tensor: t.Tensor = t.tensor(labels)
-            control_labels_tensor: t.Tensor = t.tensor(control_labels)
-            # print(acts)
-            # print(acts.shape)
             data_to_save: dict[str, t.Tensor | dict[str, int | str]] = {
                 "activations": acts,
-                "standard_labels": labels_tensor,
-                "control_labels": control_labels_tensor,
                 "metadata": {
                     "layer": layer_num,
                     "model": self.model_name,
@@ -93,10 +85,10 @@ class ActivationLoader:
 
         assert self.tokenizer is not None and self.hf_model is not None
 
-        _, dataloader = get_dataset_and_dataloader(
-            language, split, batch_size=batch_size
-        )
-        n_layers = len(self.hf_model.model.layers)
+        dataset: SICKMergedDataset = SICKMergedDataset(language, split)
+        dataloader = DataLoader(dataset, batch_size, shuffle=False)
+
+        n_layers: int = len(self.hf_model.model.layers)
 
         # register hooks
         hook_handles = []
@@ -109,13 +101,12 @@ class ActivationLoader:
         processed = 0  # number of examples seen after start_index
         batch_id: int = start_index
 
-        len_dataloader = len(dataloader)
+        len_dataloader: int = len(dataloader)
         try:
             for batch_num, (
-                (sentence_a_batch, sentence_b_batch),
-                batch_labels,
-                batch_control_labels,
+                sentence_tuple_batch,
                 _,
+                original_ids_batch,
             ) in tqdm(
                 enumerate(dataloader),
                 desc="Extracting all layers",
@@ -129,7 +120,9 @@ class ActivationLoader:
                 # Create prompts for all sentences in the batch
                 prompts: list[str] = [
                     f"Premise: {sent_a} Hypothesis: {sent_b} Label:"
-                    for sent_a, sent_b in zip(sentence_a_batch, sentence_b_batch)
+                    for sent_a, sent_b in zip(
+                        sentence_tuple_batch[0], sentence_tuple_batch[1]
+                    )
                 ]
 
                 # Tokenize entire batch at once
@@ -151,14 +144,12 @@ class ActivationLoader:
                 # print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
                 # print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
 
-                processed += len(batch_labels)
+                processed += len(original_ids_batch)
 
                 # Save batch and reset
                 if save_to_disk:
                     self._save_batch(
                         batch_acts_by_layer,
-                        batch_labels,
-                        batch_control_labels,
                         language,
                         split,
                         batch_id,
@@ -206,6 +197,7 @@ class ActivationDataset(Dataset):
         self.layer_num: int = layer_num
         self.probing_task: str = probing_task
         self.model_name: str = model_name
+        self.original_dataset: SICKMergedDataset = SICKMergedDataset(language, split)
 
         self.activations, self.labels = self.load_activations()
 
@@ -217,6 +209,7 @@ class ActivationDataset(Dataset):
         total_labels_list: list[Tensor] = []
 
         batch_id = 0
+        i = 0
         while True:
             try:
                 activations_filepath: str = get_activations_filepath(
@@ -230,14 +223,20 @@ class ActivationDataset(Dataset):
             # print(f"Loaded activations from {activations_filepath}")
 
             activations: Tensor = data["activations"]
-            labels: Tensor = data[f"{self.probing_task}_labels"]
 
-            # print(f"activations=\n{activations}\n----------")
-            # print(f"list(activations)=\n{list(activations)}\n----------")
+            new_activations: list[Tensor] = list(activations)
+
+            new_labels: Tensor = t.IntTensor(
+                self.original_dataset.get_labels_in_range(
+                    i, i + len(new_activations), self.probing_task
+                )
+            )
+            print(new_labels)
+            i += len(new_activations)
 
             # Convert tensors to lists of individual tensors and extend
-            total_activations_list.extend(list(activations))
-            total_labels_list.extend(list(labels))
+            total_activations_list.extend(new_activations)
+            total_labels_list.extend(new_labels)
 
             batch_id += 1
 
@@ -255,50 +254,34 @@ def get_activations_filepath(model_name, language, split, layer_num, batch_id) -
 
 
 if __name__ == "__main__":
-    save_to_disk = True
-    generate = True
-    amount_to_generate = 256
-    batch_size = 64
+    save_to_disk: bool = True
+    generate: bool = True
+    amount_to_generate: int = 64
+    batch_size: int = 16
 
-    model_name = "olmo_model"
-    # languages_generated = LANGUAGES
-    languages_generated = ["en"]
+    model_name: str = "olmo_model"
+    # languages_to_generate: list[str] = LANGUAGES
+    languages_to_generate: list[str] = ["en"]
+    # splits_to_generate: list[str] = SPLITS
+    splits_to_generate: list[str] = ["train", "test"]
 
     print(
-        f"save_to_disk={save_to_disk}\ngenerate={generate}\namount_to_generate={amount_to_generate}\nbatch_size={batch_size}\nmodel_name={model_name}\nlanguages_generated={languages_generated}"
+        f"save_to_disk={save_to_disk}\ngenerate={generate}\namount_to_generate={amount_to_generate}\nbatch_size={batch_size}\nmodel_name={model_name}\nlanguages_to_generate={languages_to_generate}"
     )
 
     activation_loader: ActivationLoader = ActivationLoader(model_name)
 
     if generate:
-        for language in languages_generated:
-            # example: start at 256th example, batch size 128
-            activation_loader.generate_activations(
-                language,
-                "train",
-                save_to_disk=save_to_disk,
-                amount_to_generate=amount_to_generate,
-                batch_size=batch_size,
-                start_index=0,
-            )
-
-            activation_loader.generate_activations(
-                language,
-                "test",
-                save_to_disk=save_to_disk,
-                amount_to_generate=amount_to_generate,
-                batch_size=batch_size,
-                start_index=0,
-            )
-
-            activation_loader.generate_activations(
-                language,
-                "val",
-                save_to_disk=save_to_disk,
-                amount_to_generate=amount_to_generate,
-                batch_size=batch_size,
-                start_index=0,
-            )
+        for language in languages_to_generate:
+            for split in splits_to_generate:
+                activation_loader.generate_activations(
+                    language,
+                    split,
+                    save_to_disk=save_to_disk,
+                    amount_to_generate=amount_to_generate,
+                    batch_size=batch_size,
+                    start_index=0,
+                )
 
     activations_dataset = ActivationDataset("en", "train", 0, "standard", model_name)
 
