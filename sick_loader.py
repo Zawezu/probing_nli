@@ -162,62 +162,83 @@ def add_to_dict(dictionary, key, value) -> None:
         dictionary[key] = value
 
 
-def create_control_labels(dataset_dict, disjunct: bool, label_ratio=None) -> None:
+def create_disjunct_labels(dataset_dict, unique_labels, amount_per_label):
+    print("Creating disjunct control labels")
+    # Create dictionary with the label_ratios when we exclude each of the labels
+    total_amount: int = sum(amount_per_label)
+    label_ratios: dict[str, dict[int, float]] = {}
+    for label_excluded, amount_excluded in enumerate(amount_per_label):
+        label_ratios[f"{label_excluded}_out"] = {}
+        # Calculate the ratio of each label if we exclude a particular label
+        for label, amount in enumerate(amount_per_label):
+            label_ratios[f"{label_excluded}_out"][label] = amount / (
+                total_amount - amount_excluded
+            )
+        # Forcefully exclude the label by setting its ratio to 0
+        label_ratios[f"{label_excluded}_out"][label_excluded] = 0
+    print(f"Label ratios excluding each of the labels: {label_ratios}")
+
+    # print(label_ratios)
+
+    for id, values in dataset_dict.items():
+        original_label: int = values["standard_label"]
+        label_ratios_used: list[float] = list(
+            label_ratios[f"{original_label}_out"].values()
+        )
+        # print(f"label_ratios_used={label_ratios_used}")
+        disjunct_control_label: int = random.choices(
+            unique_labels, weights=label_ratios_used, k=1
+        )[0]
+        dataset_dict[id]["disjunct_control_label"] = disjunct_control_label
+
+
+def create_non_disjunct_labels(dataset_dict, unique_labels, amount_per_label):
+    print("Creating non-disjunct control labels")
+    print(f"Amount per label: {amount_per_label}")
+    label_ratios: list[float] = [
+        amount / sum(amount_per_label) for amount in amount_per_label
+    ]
+    print(f"Label ratios: {label_ratios}")
+    # Create list with the correct amounts of each label
+    control_labels = random.choices(
+        unique_labels, label_ratios, k=sum(amount_per_label)
+    )
+
+    # Add the control label to each row in the dataset
+    for id in dataset_dict.keys():
+        dataset_dict[id]["control_label"] = control_labels.pop(0)
+
+
+def create_control_labels(
+    dataset_dict, disjunct: bool, predetermined_label_ratio: list[float] | None = None
+) -> None:
     """
     disjunt: determines whether the label at some line is necessarily different from the original label
     """
+    print("Creating all control labels")
     unique_labels: list[int] = list(LABEL_MAP.values())
     # If we don't specify the label_ratio, use the same ratio as in the real labels
-    if label_ratio is None:
-        amount_per_label: dict[int, int] = {label: 0 for label in unique_labels}
+    if predetermined_label_ratio is None:
+        # Calculate the real ratio
+        amount_per_label: list[int] = [0 for _ in unique_labels]
         for tup in dataset_dict.values():
             standard_label: int = tup["standard_label"]
             amount_per_label[standard_label] += 1
-    else:
-        amount_per_label = label_ratio
 
-    if disjunct:
+        if disjunct:
+            create_disjunct_labels(dataset_dict, unique_labels, amount_per_label)
+        else:
+            create_non_disjunct_labels(dataset_dict, unique_labels, amount_per_label)
+    else:
         assert (
-            label_ratio is None
-        ), "label_ratio should not be specified if disjunct is true"
-
-        # Create dictionary with the probabilities when we exclude each of the labels
-        total_amount: int = sum(amount_per_label.values())
-        probabilities: dict[str, dict[int, float]] = {}
-        for label_excluded, amount_excluded in amount_per_label.items():
-            probabilities[f"{label_excluded}_out"] = {}
-            # Calculate the probability of each label if we exclude a particular label
-            for label, amount in amount_per_label.items():
-                probabilities[f"{label_excluded}_out"][label] = amount / (
-                    total_amount - amount_excluded
-                )
-            # Forcefully exclude the label by setting its probability to 0
-            probabilities[f"{label_excluded}_out"][label_excluded] = 0
-
-        # print(probabilities)
-
-        for id, values in dataset_dict.items():
-            original_label: int = values["standard_label"]
-            probabilities_used: list[float] = list(
-                probabilities[f"{original_label}_out"].values()
-            )
-            # print(f"probabilities_used={probabilities_used}")
-            disjunct_control_label: int = random.choices(
-                unique_labels, weights=probabilities_used, k=1
-            )[0]
-            dataset_dict[id]["disjunct_control_label"] = disjunct_control_label
-    else:
-        # Create list with the correct amounts of each label
-        control_labels: list[int] = []
-        for label, amount in amount_per_label.items():
-            control_labels += [label] * amount
-
-        # Shuffle the list
-        random.shuffle(control_labels)
-
-        # Add the control label to each row in the dataset
-        for id in dataset_dict.keys():
-            dataset_dict[id]["control_label"] = control_labels.pop(0)
+            round(sum(list(predetermined_label_ratio)), 3) == 1.00
+        ), "predetermined_label_ratio must sum up to 1"
+        total_amount_of_labels = len(dataset_dict.values())
+        print(f"total_amount_of_labels: {total_amount_of_labels}")
+        amount_per_label = [
+            round(ratio * total_amount_of_labels) for ratio in predetermined_label_ratio
+        ]
+        create_disjunct_labels(dataset_dict, unique_labels, amount_per_label)
 
 
 def create_merged_json() -> None:

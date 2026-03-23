@@ -6,10 +6,16 @@ from tqdm import tqdm
 from pathlib import Path
 
 from sick_loader import SICKMergedDataset
-from common_constants import ACTIVATIONS_PATH, MODEL_FILEPATHS, SPLITS
+from common_constants import ACTIVATIONS_PATH, MODEL_FILEPATHS
 
-# global device so that methods can refer to it
-device = "cuda" if t.cuda.is_available() else "cpu"
+device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
+
+
+class SpecialCase:
+    def __init__(self, language: str, split: str, start_from_batch: int) -> None:
+        self.language: str = language
+        self.split: str = split
+        self.start_from_batch: int = start_from_batch
 
 
 class ActivationSaver:
@@ -74,7 +80,7 @@ class ActivationSaver:
         `start_from_batch` can be used to skip the first N batches so that you can resume
         after a crash.
 
-        `amount_to_generate` limits the number of examples produced *after* the start
+        `amount_to_generate` limits the number of batches produced *after* the start
         index.
         """
         if self.tokenizer is None or self.hf_model is None:
@@ -98,7 +104,6 @@ class ActivationSaver:
             )
             hook_handles.append(handle)
 
-        processed = 0  # number of examples seen after start_from_batch
         batch_id: int = start_from_batch
 
         len_dataloader: int = len(dataloader)
@@ -148,8 +153,6 @@ class ActivationSaver:
                 # print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
                 # print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
 
-                processed += len(original_ids_batch)
-
                 # Save batch and reset
                 if save_to_disk:
                     self._save_batch(
@@ -160,7 +163,10 @@ class ActivationSaver:
                     )
                 batch_id += 1
 
-                if amount_to_generate and processed >= amount_to_generate:
+                if (
+                    amount_to_generate
+                    and batch_id - start_from_batch >= amount_to_generate
+                ):
                     break
         finally:
             for handle in hook_handles:
@@ -172,7 +178,7 @@ class ActivationSaver:
         )
         self.hf_model = AutoModelForCausalLM.from_pretrained(
             MODEL_FILEPATHS[self.model_name], local_files_only=True
-        ).to(device)
+        ).to(device)  # type: ignore
         with open(f"{ACTIVATIONS_PATH}/{self.model_name}/n_layers.txt", "w") as file:
             file.write(str(len(self.hf_model.model.layers)))
 
@@ -262,9 +268,10 @@ def get_activations_filepath(
 def generate_all_activations(
     languages_to_generate: list,
     splits_to_generate: list,
-    amount_to_generate: int,
+    amount_to_generate: int | None,
+    save_to_disk: bool,
     batch_size: int,
-    special_cases=[],
+    special_cases: list[SpecialCase] = [],
 ) -> None:
     for language in languages_to_generate:
         for split in splits_to_generate:
@@ -273,19 +280,16 @@ def generate_all_activations(
 
             # Handle special cases where we want to start generating from another batch.
             for special_case in special_cases:
-                if (
-                    special_case["language"] == language
-                    and special_case["split"] == split
-                ):
-                    start_from_batch: int = special_case["start_from_batch"]
+                if special_case.language == language and special_case.split == split:
+                    start_from_batch: int = special_case.start_from_batch
                     print(
-                        f"Handling special case: {special_case}. Starting from batch {special_case["start_from_batch"]}"
+                        f"Handling special case: {special_case}. Starting from batch {special_case.start_from_batch}"
                     )
 
             activation_loader.generate_activations(
                 language,
                 split,
-                save_to_disk=True,
+                save_to_disk=save_to_disk,
                 amount_to_generate=amount_to_generate,
                 batch_size=batch_size,
                 start_from_batch=start_from_batch,
@@ -293,17 +297,33 @@ def generate_all_activations(
 
 
 if __name__ == "__main__":
+    # debug = True
+    # print(f"Debug mode: {debug}")
+
+    # if debug:
+    #     save_to_disk: bool = False
+    #     generate: bool = True
+    #     amount_to_generate: int | None = 4
+    #     batch_size: int = 2
+    #     model_name: str = "olmo_model"
+    #     languages_to_generate: list[str] = ["en"]
+    #     splits_to_generate: list[str] = ["train"]
+    # else:
+    #     save_to_disk: bool = True
+    #     generate: bool = True
+    #     amount_to_generate: int | None = None
+    #     batch_size: int = 128
+    #     model_name: str = "olmo_model"
+    #     languages_to_generate: list[str] = LANGUAGES
+    #     splits_to_generate: list[str] = SPLITS
+
     save_to_disk: bool = True
     generate: bool = True
-    # amount_to_generate: int = 64
-    amount_to_generate = None
-    batch_size: int = 128
-
+    amount_to_generate: int | None = 4
+    batch_size: int = 256
     model_name: str = "olmo_model"
-    # languages_to_generate: list[str] = LANGUAGES
-    languages_to_generate: list[str] = ["es"]
-    splits_to_generate: list[str] = SPLITS
-    # splits_to_generate: list[sstart_from_batchtr] = ["train", "test"]
+    languages_to_generate: list[str] = ["en"]
+    splits_to_generate: list[str] = ["train"]
 
     print(
         f"save_to_disk={save_to_disk}\ngenerate={generate}\namount_to_generate={amount_to_generate}\nbatch_size={batch_size}\nmodel_name={model_name}\nlanguages_to_generate={languages_to_generate}"
@@ -311,15 +331,15 @@ if __name__ == "__main__":
 
     activation_loader: ActivationSaver = ActivationSaver(model_name)
 
-    special_cases: list[dict[str, str | int]] = [
-        {"language": "es", "split": "train", "start_from_batch": 26}
-    ]
+    # special_cases: list[SpecialCase] = [SpecialCase("es", "train", 26)]
+    special_cases: list[SpecialCase] = []
 
     if generate:
         generate_all_activations(
             languages_to_generate,
             splits_to_generate,
             amount_to_generate,
+            save_to_disk,
             batch_size,
             special_cases=special_cases,
         )
