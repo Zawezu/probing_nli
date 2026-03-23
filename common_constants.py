@@ -1,4 +1,5 @@
 from typing import LiteralString
+# import os
 
 # SICK constants
 SICK_FOLDER = "data/sick"
@@ -25,3 +26,5 @@ ACTIVATIONS_PATH = "./data/activations/"
 # Other constants
 LANGUAGES: list[str] = ["en", "es"]
 SPLITS: list[str] = ["train", "test", "val"]
+
+# os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'

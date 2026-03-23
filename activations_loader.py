@@ -6,13 +6,13 @@ from tqdm import tqdm
 from pathlib import Path
 
 from sick_loader import SICKMergedDataset
-from common_constants import ACTIVATIONS_PATH, MODEL_FILEPATHS
+from common_constants import ACTIVATIONS_PATH, MODEL_FILEPATHS, SPLITS
 
 # global device so that methods can refer to it
 device = "cuda" if t.cuda.is_available() else "cpu"
 
 
-class ActivationLoader:
+class ActivationSaver:
     def __init__(self, model_name, tokenizer=None, hf_model=None) -> None:
         self.activations: dict[str, t.Tensor] = {}
         self.model_name: str = model_name
@@ -62,16 +62,16 @@ class ActivationLoader:
 
     def generate_activations(
         self,
-        language,
-        split,
+        language: str,
+        split: str,
         save_to_disk=True,
         amount_to_generate=None,
         batch_size: int = 128,
-        start_index: int = 0,
+        start_from_batch: int = 0,
     ) -> None:
         """
         Iterate through `dataloader` in batches, processing all sentences in each batch together.
-        `start_index` can be used to skip the first N batches so that you can resume
+        `start_from_batch` can be used to skip the first N batches so that you can resume
         after a crash.
 
         `amount_to_generate` limits the number of examples produced *after* the start
@@ -98,8 +98,8 @@ class ActivationLoader:
             )
             hook_handles.append(handle)
 
-        processed = 0  # number of examples seen after start_index
-        batch_id: int = start_index
+        processed = 0  # number of examples seen after start_from_batch
+        batch_id: int = start_from_batch
 
         len_dataloader: int = len(dataloader)
         try:
@@ -112,7 +112,7 @@ class ActivationLoader:
                 desc="Extracting all layers",
                 total=len_dataloader,
             ):
-                if batch_num < start_index:  # skip until we reach the resume point
+                if batch_num < start_from_batch:  # skip until we reach the resume point
                     continue
 
                 batch_acts_by_layer: dict[int, t.Tensor] = {}
@@ -140,6 +140,10 @@ class ActivationLoader:
                     ].cpu()
 
                     batch_acts_by_layer[layer_num] = acts
+
+                # Clear GPU memory
+                self.activations.clear()
+                t.cuda.empty_cache()
 
                 # print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
                 # print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
@@ -231,7 +235,7 @@ class ActivationDataset(Dataset):
                     i, i + len(new_activations), self.probing_task
                 )
             )
-            print(new_labels)
+            # print(new_labels)
             i += len(new_activations)
 
             # Convert tensors to lists of individual tensors and extend
@@ -242,48 +246,87 @@ class ActivationDataset(Dataset):
 
         return t.stack(total_activations_list, dim=0), t.stack(total_labels_list, dim=0)
 
-    def __getitem__(self, i) -> tuple[Tensor, Tensor]:
+    def __getitem__(self, i: int) -> tuple[Tensor, Tensor]:
         return self.activations[i], self.labels[i]
 
     def __len__(self) -> int:
         return len(self.activations)
 
 
-def get_activations_filepath(model_name, language, split, layer_num, batch_id) -> str:
+def get_activations_filepath(
+    model_name: str, language: str, split: str, layer_num: int, batch_id: int
+) -> str:
     return f"{ACTIVATIONS_PATH}/{model_name}/{language}/{split}/layer{layer_num}_batch{batch_id}.pt"
+
+
+def generate_all_activations(
+    languages_to_generate: list,
+    splits_to_generate: list,
+    amount_to_generate: int,
+    batch_size: int,
+    special_cases=[],
+) -> None:
+    for language in languages_to_generate:
+        for split in splits_to_generate:
+            print(f"{"-"*20}\nGenerating language {language}, split {split}\n{"-"*20}")
+            start_from_batch: int = 0
+
+            # Handle special cases where we want to start generating from another batch.
+            for special_case in special_cases:
+                if (
+                    special_case["language"] == language
+                    and special_case["split"] == split
+                ):
+                    start_from_batch: int = special_case["start_from_batch"]
+                    print(
+                        f"Handling special case: {special_case}. Starting from batch {special_case["start_from_batch"]}"
+                    )
+
+            activation_loader.generate_activations(
+                language,
+                split,
+                save_to_disk=True,
+                amount_to_generate=amount_to_generate,
+                batch_size=batch_size,
+                start_from_batch=start_from_batch,
+            )
 
 
 if __name__ == "__main__":
     save_to_disk: bool = True
     generate: bool = True
-    amount_to_generate: int = 64
-    batch_size: int = 16
+    # amount_to_generate: int = 64
+    amount_to_generate = None
+    batch_size: int = 128
 
     model_name: str = "olmo_model"
     # languages_to_generate: list[str] = LANGUAGES
-    languages_to_generate: list[str] = ["en"]
-    # splits_to_generate: list[str] = SPLITS
-    splits_to_generate: list[str] = ["train", "test"]
+    languages_to_generate: list[str] = ["es"]
+    splits_to_generate: list[str] = SPLITS
+    # splits_to_generate: list[sstart_from_batchtr] = ["train", "test"]
 
     print(
         f"save_to_disk={save_to_disk}\ngenerate={generate}\namount_to_generate={amount_to_generate}\nbatch_size={batch_size}\nmodel_name={model_name}\nlanguages_to_generate={languages_to_generate}"
     )
 
-    activation_loader: ActivationLoader = ActivationLoader(model_name)
+    activation_loader: ActivationSaver = ActivationSaver(model_name)
+
+    special_cases: list[dict[str, str | int]] = [
+        {"language": "es", "split": "train", "start_from_batch": 26}
+    ]
 
     if generate:
-        for language in languages_to_generate:
-            for split in splits_to_generate:
-                activation_loader.generate_activations(
-                    language,
-                    split,
-                    save_to_disk=save_to_disk,
-                    amount_to_generate=amount_to_generate,
-                    batch_size=batch_size,
-                    start_index=0,
-                )
+        generate_all_activations(
+            languages_to_generate,
+            splits_to_generate,
+            amount_to_generate,
+            batch_size,
+            special_cases=special_cases,
+        )
 
-    activations_dataset = ActivationDataset("en", "train", 0, "standard", model_name)
+    activations_dataset: ActivationDataset = ActivationDataset(
+        "en", "train", 0, "standard", model_name
+    )
 
     for i in range(8):
         print(f"{activations_dataset[i]}\n-----------------")
