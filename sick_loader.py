@@ -200,7 +200,7 @@ def create_non_disjunct_labels(dataset_dict, unique_labels, amount_per_label):
     ]
     print(f"Label ratios: {label_ratios}")
     # Create list with the correct amounts of each label
-    control_labels = random.choices(
+    control_labels: list[int] = random.choices(
         unique_labels, label_ratios, k=sum(amount_per_label)
     )
 

@@ -2,7 +2,7 @@ from typing import LiteralString
 # import os
 
 # SICK constants
-SICK_FOLDER = "data/sick"
+SICK_FOLDER = "./data/sick"
 
 SICK_DIRTY_FOLDERS: dict[str, str] = {"en": "sick_en", "es": "sick_es"}
 SICK_DIRTY_EN_FILE = "SICK_annotated.txt"
@@ -21,10 +21,15 @@ MODEL_FOLDER = "models"
 MODEL_FILEPATHS: dict[str, str] = {"olmo_model": f"./{MODEL_FOLDER}/olmo_model"}
 
 # Activations constants
-ACTIVATIONS_PATH = "./data/activations/"
+ACTIVATIONS_FOLDER = "./data/activations"
 
 # Other constants
 LANGUAGES: list[str] = ["en", "es"]
 SPLITS: list[str] = ["train", "test", "val"]
+
+# Experiment constants
+EXPERIMENT_RESULTS_FOLDER = "./experiment_results"
+PLOTS_FOLDER = "./plots"
+PROBES_FOLDER = "./probes"
 
 # os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'

@@ -1,5 +1,8 @@
 models/
 data/activations/
+probes/
+experiment_results/
+plots/
 
 huggingface_key.txt
 activations_generator.py

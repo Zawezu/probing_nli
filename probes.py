@@ -6,6 +6,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from torch.utils.data import DataLoader
 import torch.optim as optim
+from pathlib import Path
+from common_constants import PROBES_FOLDER
 
 
 class LRProbe(t.nn.Module):
@@ -147,3 +149,103 @@ def train_num_epochs(model, train_loader, optimizer, loss_fn, num_epochs, device
         total_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
         avg_loss = total_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
+
+
+def get_probe_filename(
+    probe_type: str, language: str, layer_num: int, probing_task: str
+) -> str:
+    return f"{probe_type}_{language}_layer{layer_num}_{probing_task}.pt"
+
+
+def save_probe(
+    model: t.nn.Module,
+    language: str,
+    layer_num: int,
+    probing_task: str,
+    probe_type: str,
+    model_name: str,
+) -> str:
+    """
+    Save a probe model to a file.
+
+    Args:
+        model: The pytorch model to save
+        model_name: Name of the model (e.g., 'olmo_model')
+        language: Language code (e.g., 'en', 'es')
+        layer_num: Layer number
+        probing_task: Probing task name (e.g., 'standard')
+
+    Returns:
+        The path to the saved file
+    """
+    save_dir: Path = Path(PROBES_FOLDER) / model_name
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    filename: str = get_probe_filename(probe_type, language, layer_num, probing_task)
+    filepath: Path = save_dir / filename
+
+    t.save(model.state_dict(), filepath)
+    print(f"Probe saved to {filepath}")
+
+    return str(filepath)
+
+
+def load_probe(
+    model: t.nn.Module,
+    language: str,
+    layer_num: int,
+    probing_task: str,
+    probe_type: str,
+    model_name: str,
+    device: str = "cpu",
+) -> t.nn.Module:
+    """
+    Load a probe model from a file.
+
+    Args:
+        model: The pytorch model instance to load state into
+        model_name: Name of the model (e.g., 'olmo_model')
+        language: Language code (e.g., 'en', 'es')
+        layer_num: Layer number
+        probing_task: Probing task name (e.g., 'standard')
+        device: Device to load model onto (default: 'cpu')
+
+    Returns:
+        The loaded model
+    """
+    filename: str = get_probe_filename(probe_type, language, layer_num, probing_task)
+    filepath: Path = Path(PROBES_FOLDER) / model_name / filename
+
+    state_dict = t.load(filepath, map_location=device)
+    model.load_state_dict(state_dict)
+    model.to(device)
+
+    print(f"Probe loaded from {filepath}")
+
+    return model
+
+
+def probe_exists(
+    language: str,
+    layer_num: int,
+    probing_task: str,
+    probe_type: str,
+    model_name: str,
+) -> bool:
+    """
+    Check if a probe file exists.
+
+    Args:
+        language: Language code (e.g., 'en', 'es')
+        layer_num: Layer number
+        probing_task: Probing task name (e.g., 'standard')
+        probe_type: Type of probe (e.g., 'lr', 'mlp')
+        model_name: Name of the model (e.g., 'olmo_model')
+
+    Returns:
+        True if the probe file exists, False otherwise
+    """
+    filename: str = get_probe_filename(probe_type, language, layer_num, probing_task)
+    filepath: Path = Path(PROBES_FOLDER) / model_name / filename
+
+    return filepath.exists()

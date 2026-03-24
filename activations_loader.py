@@ -6,7 +6,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 from sick_loader import SICKMergedDataset
-from common_constants import ACTIVATIONS_PATH, MODEL_FILEPATHS
+from common_constants import ACTIVATIONS_FOLDER, MODEL_FILEPATHS
 
 device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
@@ -179,7 +179,7 @@ class ActivationSaver:
         self.hf_model = AutoModelForCausalLM.from_pretrained(
             MODEL_FILEPATHS[self.model_name], local_files_only=True
         ).to(device)  # type: ignore
-        with open(f"{ACTIVATIONS_PATH}/{self.model_name}/n_layers.txt", "w") as file:
+        with open(f"{ACTIVATIONS_FOLDER}/{self.model_name}/n_layers.txt", "w") as file:
             file.write(str(len(self.hf_model.model.layers)))
 
     def get_number_of_layers(self) -> int:
@@ -188,7 +188,7 @@ class ActivationSaver:
         else:
             print("Model not loaded. Getting the number of layers from n_layers.txt")
             with open(
-                f"{ACTIVATIONS_PATH}/{self.model_name}/n_layers.txt", "r"
+                f"{ACTIVATIONS_FOLDER}/{self.model_name}/n_layers.txt", "r"
             ) as file:
                 return int(file.readline())
 
@@ -262,7 +262,7 @@ class ActivationDataset(Dataset):
 def get_activations_filepath(
     model_name: str, language: str, split: str, layer_num: int, batch_id: int
 ) -> str:
-    return f"{ACTIVATIONS_PATH}/{model_name}/{language}/{split}/layer{layer_num}_batch{batch_id}.pt"
+    return f"{ACTIVATIONS_FOLDER}/{model_name}/{language}/{split}/layer{layer_num}_batch{batch_id}.pt"
 
 
 def generate_all_activations(
