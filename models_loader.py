@@ -1,12 +1,20 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from common_constants import MODEL_FOLDER
+from common_constants import MODELS_FOLDER, MODEL_IDS
+
+
+def load_and_save_model(model_name: str) -> None:
+    model_id: str = MODEL_IDS[model_name]
+
+    model = AutoModelForCausalLM.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+    filepath: str = f"{MODELS_FOLDER}/{model_name}"
+
+    model.save_pretrained(filepath)
+    tokenizer.save_pretrained(filepath)
 
 
 if __name__ == "__main__":
-    olmo = AutoModelForCausalLM.from_pretrained("allenai/Olmo-3-1025-7B")
-    tokenizer = AutoTokenizer.from_pretrained("allenai/Olmo-3-1025-7B")
+    # load_and_save_model("olmo_model")
 
-    olmo_filepath = f"./{MODEL_FOLDER}/olmo_model"
-
-    olmo.save_pretrained(olmo_filepath)
-    tokenizer.save_pretrained(olmo_filepath)
+    load_and_save_model("tiny_aya_global")

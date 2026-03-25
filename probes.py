@@ -9,6 +9,13 @@ import torch.optim as optim
 from pathlib import Path
 from common_constants import PROBES_FOLDER
 
+mlp_training_parameters: dict[str, float | int] = {
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "weight_decay": 0,
+    "epochs": 10,
+}
+
 
 class LRProbe(t.nn.Module):
     def __init__(self, d_in, scaler_mean, scaler_scale, num_classes) -> None:
@@ -83,9 +90,7 @@ class MLPProbe(t.nn.Module):
         return t.argmax(logits, dim=-1)
 
     @staticmethod
-    def create_from_data(
-        dataset: ActivationDataset, batch_size: int, training_parameters, device
-    ):
+    def create_from_data(dataset: ActivationDataset, batch_size: int, device):
         # TODO Add scaler like in the logistic regression code
         acts, labels = dataset.activations, dataset.labels
 
@@ -103,8 +108,8 @@ class MLPProbe(t.nn.Module):
 
         optimizer = optim.Adam(
             model.parameters(),
-            lr=training_parameters["learning_rate"],
-            weight_decay=training_parameters["weight_decay"],
+            lr=mlp_training_parameters["learning_rate"],
+            weight_decay=mlp_training_parameters["weight_decay"],
         )
         loss_fn = nn.CrossEntropyLoss()
         model.to(device)
@@ -114,7 +119,7 @@ class MLPProbe(t.nn.Module):
             train_loader,
             optimizer,
             loss_fn,
-            training_parameters["num_epochs"],
+            mlp_training_parameters["num_epochs"],
             device,
         )
 
@@ -249,3 +254,45 @@ def probe_exists(
     filepath: Path = Path(PROBES_FOLDER) / model_name / filename
 
     return filepath.exists()
+
+
+def get_probe(
+    language,
+    layer_num,
+    probing_task,
+    probe_type,
+    model_name,
+    activation_dataset_train,
+    device,
+):
+    if probe_exists(language, layer_num, probing_task, probe_type, model_name):
+        print("Probe already exists. Loading from file...")
+        match probe_type:
+            case "lr":
+                probe = LRProbe.create_from_data(activation_dataset_train, device="cpu")
+            case "mlp":
+                probe = MLPProbe.create_from_data(activation_dataset_train, 128, device)
+            case _:
+                raise KeyError(f"Probe {probe_type} does not exist")
+        probe = load_probe(
+            probe,
+            language,
+            layer_num,
+            probing_task,
+            probe_type,
+            model_name,
+            device="cpu",
+        )
+    else:
+        # Create new probe
+        match probe_type:
+            case "lr":
+                probe = LRProbe.create_from_data(activation_dataset_train, device="cpu")
+            case "mlp":
+                probe = MLPProbe.create_from_data(activation_dataset_train, 128, device)
+            case _:
+                raise KeyError(f"Probe {probe_type} does not exist")
+        # Save the probe
+        save_probe(probe, language, layer_num, probing_task, probe_type, model_name)
+
+    return probe

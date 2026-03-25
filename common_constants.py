@@ -17,8 +17,11 @@ MERGED_SICK_FILEPATH: LiteralString = f"{SICK_FOLDER}/SICK_merged.json"
 LABEL_MAP: dict[str, int] = {"entailment": 0, "neutral": 1, "contradiction": 2}
 
 # Model constants
-MODEL_FOLDER = "models"
-MODEL_FILEPATHS: dict[str, str] = {"olmo_model": f"./{MODEL_FOLDER}/olmo_model"}
+MODELS_FOLDER = "models"
+MODEL_IDS: dict[str, str] = {
+    "olmo_model": "allenai/Olmo-3-1025-7B",
+    "tiny_aya_global": "CohereLabs/tiny-aya-global",
+}
 
 # Activations constants
 ACTIVATIONS_FOLDER = "./data/activations"

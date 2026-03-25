@@ -6,7 +6,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 from sick_loader import SICKMergedDataset
-from common_constants import ACTIVATIONS_FOLDER, MODEL_FILEPATHS
+from common_constants import ACTIVATIONS_FOLDER, MODELS_FOLDER
 
 device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
@@ -111,7 +111,7 @@ class ActivationSaver:
             for batch_num, (
                 sentence_tuple_batch,
                 _,
-                original_ids_batch,
+                _,
             ) in tqdm(
                 enumerate(dataloader),
                 desc="Extracting all layers",
@@ -124,11 +124,12 @@ class ActivationSaver:
 
                 # Create prompts for all sentences in the batch
                 prompts: list[str] = [
-                    f"Premise: {sent_a} Hypothesis: {sent_b} Label:"
+                    self.generate_prompt(sent_a, sent_b, language)
                     for sent_a, sent_b in zip(
                         sentence_tuple_batch[0], sentence_tuple_batch[1]
                     )
                 ]
+                print(prompts)
 
                 # Tokenize entire batch at once
                 tokens = self.tokenizer(prompts, return_tensors="pt", padding=True).to(
@@ -173,11 +174,12 @@ class ActivationSaver:
                 handle.remove()
 
     def load_model(self) -> None:
+        model_filepath: str = f"{MODELS_FOLDER}/{self.model_name}"
         self.tokenizer = AutoTokenizer.from_pretrained(
-            MODEL_FILEPATHS[self.model_name], local_files_only=True
+            model_filepath, local_files_only=True
         )
         self.hf_model = AutoModelForCausalLM.from_pretrained(
-            MODEL_FILEPATHS[self.model_name], local_files_only=True
+            model_filepath, local_files_only=True
         ).to(device)  # type: ignore
         with open(f"{ACTIVATIONS_FOLDER}/{self.model_name}/n_layers.txt", "w") as file:
             file.write(str(len(self.hf_model.model.layers)))
@@ -191,6 +193,16 @@ class ActivationSaver:
                 f"{ACTIVATIONS_FOLDER}/{self.model_name}/n_layers.txt", "r"
             ) as file:
                 return int(file.readline())
+
+    @staticmethod
+    def generate_prompt(sent_a, sent_b, language) -> str:
+        match language:
+            case "en":
+                return f"Premise: {sent_a}. Hypothesis: {sent_b}. Do these sentences entail, contradict, or are neutral to each other?"
+            case "es":
+                return f"Premisa: {sent_a}. Hipótesis: {sent_b}. ¿Estas frases implican, contradicen o son neutrales entre sí?"
+            case _:
+                raise KeyError("Invalid language passed")
 
 
 class ActivationDataset(Dataset):

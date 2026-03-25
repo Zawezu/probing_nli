@@ -81,6 +81,12 @@ class SICKDirtyDataset(Dataset):
                         pair_ID = int(data[0])
                         sentence_A = data[1]
                         sentence_B = data[2]
+
+                        # SICK Spanish sentences have dots that English SICK sentences do not.
+                        # We remove them for consistency
+                        sentence_A = sentence_A.replace(".", "").strip()
+                        sentence_B = sentence_B.replace(".", "").strip()
+
                         # relatedness_score = float(data[3])
                         label = data[4].lower()
 
