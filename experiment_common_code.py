@@ -96,48 +96,6 @@ def get_accuracy(preds: t.Tensor, labels: t.Tensor) -> float:
     return (preds == labels).float().mean().item()
 
 
-def plot_metrics(
-    experiments: list[ExperimentResult],
-    metric_type: str,
-    title: str,
-    xlabel: str,
-    ylabel: str,
-    show: bool = True,
-    save: bool = False,
-) -> None:
-    plt.figure(figsize=(10, 6))
-
-    for experiment in experiments:
-        name: str = experiment.get_name()
-        results: list[float] = getattr(experiment, metric_type)
-        layers = range(len(results))
-
-        plt.plot(layers, results, marker="o", label=name)
-
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
-    ax = plt.gca()
-    ax.set_ylim([0.2, 0.8])
-
-    if save:
-        save_dir = Path(PLOTS_FOLDER)
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        # Replace spaces ny underscores
-        file_name: str = f"{title}.png".replace(" ", "_")
-        filepath: Path = save_dir / file_name
-
-        plt.savefig(filepath)
-        print(f"Plot saved to {filepath}")
-
-    if show:
-        plt.show()
-
-
 def plot_multiple_metrics(
     experiments: list[ExperimentResult],
     metric_types: list[str],

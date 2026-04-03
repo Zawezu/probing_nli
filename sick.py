@@ -33,7 +33,7 @@ class SICKDirtyDataset(Dataset):
         match self.language:
             case "en":
                 filepath: str = (
-                    f"./{SICK_FOLDER}/{SICK_DIRTY_FOLDERS["en"]}/{SICK_DIRTY_EN_FILE}"
+                    f"./{SICK_FOLDER}/{SICK_DIRTY_FOLDERS['en']}/{SICK_DIRTY_EN_FILE}"
                 )
 
                 with open(filepath, "r", encoding="utf-8") as f:
@@ -67,7 +67,7 @@ class SICKDirtyDataset(Dataset):
                         self.labels.append(LABEL_MAP[label])
                         self.original_ids.append(pair_ID)
             case "es":
-                filepath = f"./{SICK_FOLDER}/{SICK_DIRTY_FOLDERS["es"]}/{SICK_DIRTY_ES_FILE[original_split]}"
+                filepath = f"./{SICK_FOLDER}/{SICK_DIRTY_FOLDERS['es']}/{SICK_DIRTY_ES_FILE[original_split]}"
 
                 with open(filepath, "r", encoding="utf-8") as f:
                     next(f)  # Skip first line, since it is the column names

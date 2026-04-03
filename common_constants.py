@@ -18,6 +18,7 @@ LABEL_MAP: dict[str, int] = {"entailment": 0, "neutral": 1, "contradiction": 2}
 
 # Model constants
 MODELS_FOLDER = "models"
+MODEL_NAMES: list[str] = ["olmo_model", "tiny_aya_global"]
 MODEL_IDS: dict[str, str] = {
     "olmo_model": "allenai/Olmo-3-1025-7B",
     "tiny_aya_global": "CohereLabs/tiny-aya-global",
@@ -34,5 +35,6 @@ SPLITS: list[str] = ["train", "test", "val"]
 EXPERIMENT_RESULTS_FOLDER = "./experiment_results"
 PLOTS_FOLDER = "./plots"
 PROBES_FOLDER = "./probes"
+PROBING_TASKS: list[str] = ["standard", "control", "disjunct_control"]
 
 # os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'

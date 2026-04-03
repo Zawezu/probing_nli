@@ -1,7 +1,7 @@
 import torch as t
 import torch.nn as nn
 from torch import Tensor
-from activations_loader import ActivationDataset
+from activations import ActivationDataset
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from torch.utils.data import DataLoader
@@ -221,7 +221,7 @@ def load_probe(
     filename: str = get_probe_filename(probe_type, language, layer_num, probing_task)
     filepath: Path = Path(PROBES_FOLDER) / model_name / filename
 
-    state_dict = t.load(filepath, map_location=device)
+    state_dict = t.load(filepath, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     model.to(device)
 
@@ -263,9 +263,12 @@ def get_probe(
     probe_type,
     model_name,
     activation_dataset_train,
+    force_probe_creation,
     device,
 ):
-    if probe_exists(language, layer_num, probing_task, probe_type, model_name):
+    if (not force_probe_creation) and (
+        probe_exists(language, layer_num, probing_task, probe_type, model_name)
+    ):
         print("Probe already exists. Loading from file...")
         match probe_type:
             case "lr":

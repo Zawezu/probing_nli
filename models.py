@@ -1,5 +1,6 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from common_constants import MODELS_FOLDER, MODEL_IDS
+from pathlib import Path
 
 
 def load_and_save_model(model_name: str) -> None:
@@ -9,6 +10,9 @@ def load_and_save_model(model_name: str) -> None:
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
     filepath: str = f"{MODELS_FOLDER}/{model_name}"
+
+    # Create directory if it doesn't exist
+    Path(filepath).mkdir(parents=True, exist_ok=True)
 
     model.save_pretrained(filepath)
     tokenizer.save_pretrained(filepath)

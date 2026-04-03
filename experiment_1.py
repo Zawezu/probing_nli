@@ -3,10 +3,9 @@ from typing import Literal
 
 import torch as t
 
-from activations_loader import ActivationSaver, ActivationDataset
+from activations import ActivationSaver, ActivationDataset
 from probes import get_probe
-from experiment_common_code import ExperimentResult, get_accuracy, plot_multiple_metrics
-from common_constants import LANGUAGES
+from experiment_common_code import ExperimentResult, get_accuracy
 
 experiment_number = 1
 
@@ -14,7 +13,11 @@ device: Literal["cuda", "cpu"] = "cuda" if t.cuda.is_available() else "cpu"
 
 
 def run_full_experiment(
-    language: str, probing_task: str, probe_type: str, model_name: str
+    language: str,
+    probing_task: str,
+    probe_type: str,
+    model_name: str,
+    force_probe_creation: bool,
 ) -> ExperimentResult:
     print(
         f"Running experiment {experiment_number} instance. {language}, {probing_task}, {probe_type}, {model_name}"
@@ -38,6 +41,7 @@ def run_full_experiment(
             probe_type,
             model_name,
             activation_dataset_train,
+            force_probe_creation,
             device,
         )
 
@@ -47,7 +51,7 @@ def run_full_experiment(
         )
 
         # Train accuracy
-        train_predictions: t.Tensor = probe.pred(train_acts)
+        train_predictions: t.Tensor = probe.pred(train_acts)  # type: ignore
         # print(f"Train predictions:\n{train_preds}")
         # print(f"Train labels:\n{train_labels}")
         train_accuracy: float = get_accuracy(train_predictions, train_labels)
@@ -64,7 +68,7 @@ def run_full_experiment(
             activation_dataset_test.labels,
         )
 
-        test_predictions: t.Tensor = probe.pred(test_acts)
+        test_predictions: t.Tensor = probe.pred(test_acts)  # type: ignore
         test_accuracy: float = get_accuracy(test_predictions, test_labels)
 
         test_accuracies.append(test_accuracy)
@@ -76,7 +80,7 @@ def run_full_experiment(
     experiment_result.train_accuracies = train_accuracies
     experiment_result.test_accuracies = test_accuracies
 
-    print(f"{"-"*30}")
+    print("=" * 30)
     return experiment_result
 
 
@@ -85,6 +89,7 @@ def run_experiment_1(
     probing_tasks: list[str],
     probe_type: str,
     model_names: list[str],
+    force_probe_creation: bool,
     save_results: bool = True,
 ) -> list[ExperimentResult]:
     experiment_results: list[ExperimentResult] = []
@@ -94,7 +99,7 @@ def run_experiment_1(
         for language in languages:
             for probing_task in probing_tasks:
                 experiment_result: ExperimentResult = run_full_experiment(
-                    language, probing_task, probe_type, model_name
+                    language, probing_task, probe_type, model_name, force_probe_creation
                 )
                 experiment_results.append(experiment_result)
 
@@ -104,39 +109,3 @@ def run_experiment_1(
                     print(f"Saved result to {filepath}")
 
     return experiment_results
-
-
-if __name__ == "__main__":
-    run_experiment: bool = True
-
-    languages: list[str] = LANGUAGES
-    probing_tasks: list[str] = ["standard", "control", "disjunct_control"]
-    probe_type: str = "lr"
-    model_names: list[str] = ["olmo_model"]
-
-    # If run_experiment, run the experiment and save the results as files.
-    if run_experiment:
-        run_experiment_1(languages, probing_tasks, probe_type, model_names)
-
-    # Load the results from files
-    experiment_results_per_language: dict[str, list[ExperimentResult]] = {}
-
-    for model_name in model_names:
-        for language in languages:
-            experiment_results_per_language[language] = []
-            for probing_task in probing_tasks:
-                experiment_result: ExperimentResult = ExperimentResult.get_from_file(
-                    experiment_number, language, probing_task, probe_type, model_name
-                )
-                experiment_results_per_language[language].append(experiment_result)
-
-            # Make some plots
-            plot_multiple_metrics(
-                experiment_results_per_language[language],
-                ["test_accuracies", "train_accuracies"],
-                f"Test and test accuracies by layer for language {language}",
-                "layer",
-                "accuracy",
-                show=True,
-                save=True,
-            )
