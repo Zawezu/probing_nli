@@ -423,9 +423,12 @@ def merge_activation_batches(
     if not directory.exists():
         raise FileNotFoundError(f"Directory not found: {directory}")
 
-    # Find all batch files for this layer, sorted by batch number
+    # Find all batch files for this layer, sorted numerically by batch number
     pattern: str = f"layer{layer_num}_batch*.pt"
-    batch_files: list[Path] = sorted(directory.glob(pattern))
+    batch_files: list[Path] = sorted(
+        directory.glob(pattern),
+        key=lambda p: int(p.stem.split("_batch")[1])
+    )
 
     if not batch_files:
         raise FileNotFoundError(
