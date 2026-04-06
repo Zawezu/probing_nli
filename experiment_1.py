@@ -1,11 +1,9 @@
 # from sick_loader import get_dataset_and_dataloader
 from typing import Literal
-from matplotlib.pylab import ndarray
 from torch import Tensor
 
 import torch as t
 from sklearn.metrics import confusion_matrix
-import numpy as np
 
 from activations import ActivationSaver, ActivationDataset
 from probes import get_probe
@@ -15,6 +13,7 @@ experiment_number = 1
 
 device: Literal["cuda", "cpu"] = "cuda" if t.cuda.is_available() else "cpu"
 
+
 def run_full_experiment(
     language: str,
     probing_task: str,
@@ -23,11 +22,19 @@ def run_full_experiment(
     force_probe_creation: bool,
     num_layers: int | None,
 ) -> ExperimentResult:
+    """
+    Performs a full run of experiment 1
+    - Gets a probe trained on the train set
+    - Generates predictions on the train and test sets
+    - Saves all the metrics into a ExperimentResult object
+    """
     print(
         f"Running experiment {experiment_number} instance. {language}, {probing_task}, {probe_type}, {model_name}"
     )
     # Create empty ExperimentResult that we will gradually fill with the results
-    exp_result = ExperimentResult(experiment_number, language, probing_task, probe_type, model_name)
+    exp_result = ExperimentResult(
+        experiment_number, language, probing_task, probe_type, model_name
+    )
 
     olmo_activation_loader: ActivationSaver = ActivationSaver("olmo_model")
 
@@ -66,22 +73,24 @@ def run_full_experiment(
             device,
         )
 
-        # Get train activations and predictions
-        train_acts: Tensor = activation_dataset_train.activations
-        train_preds: Tensor = probe.pred(train_acts)  # type: ignore
+        # Get train predictions for generating the metrics
+        train_preds: Tensor = probe.pred(activation_dataset_train.activations)  # type: ignore
 
         # Save confusion matrix of train predictions
-        exp_result.append_metric("train", "cm", confusion_matrix(train_labels, train_preds))  # type: ignore
-        
-        # Get test activations and predictions
-        test_acts: Tensor = activation_dataset_test.activations
-        test_preds: Tensor = probe.pred(test_acts)  # type: ignore
+        exp_result.append_metric(
+            "train", "cm", confusion_matrix(train_labels, train_preds)
+        )  # type: ignore
+
+        # Get test predictions for generating the metrics
+        test_preds: Tensor = probe.pred(activation_dataset_test.activations)  # type: ignore
 
         print(f"First few test labels: {activation_dataset_test.labels[:20]}")
         print(f"First few test preds:  {test_preds}")
 
         # Save confusion matrix of test predictions
-        exp_result.append_metric("test", "cm", confusion_matrix(test_labels, test_preds))  # type: ignore
+        exp_result.append_metric(
+            "test", "cm", confusion_matrix(test_labels, test_preds)
+        )  # type: ignore
 
         # Use the confusion matrix to get the rest of metrics for this layer
         exp_result.add_metrics_from_confusion_matrix()
@@ -97,7 +106,8 @@ def run_experiment_1(
     model_names: list[str],
     force_probe_creation: bool,
     save_results: bool = True,
-    num_layers: int | None = None, # Attribute to force the model to only generate a number of layers
+    num_layers: int
+    | None = None,  # Attribute to force the model to only generate a number of layers
 ) -> list[ExperimentResult]:
     exp_results: list[ExperimentResult] = []
 
@@ -106,12 +116,22 @@ def run_experiment_1(
         for language in languages:
             # Run full experiment on control task
             control_exp_result: ExperimentResult = run_full_experiment(
-                language, control_task, probe_type, model_name, force_probe_creation, num_layers
+                language,
+                control_task,
+                probe_type,
+                model_name,
+                force_probe_creation,
+                num_layers,
             )
 
             # Run full experiment on standard task
             standard_exp_result: ExperimentResult = run_full_experiment(
-                language, standard_task, probe_type, model_name, force_probe_creation, num_layers
+                language,
+                standard_task,
+                probe_type,
+                model_name,
+                force_probe_creation,
+                num_layers,
             )
 
             # Add the marginal metrics (so the difference between standard and control metrics) to the standard experiment result
