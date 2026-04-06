@@ -288,6 +288,7 @@ def get_probe(
         )
     else:
         # Create new probe
+        print("Creating probe")
         match probe_type:
             case "lr":
                 probe = LRProbe.create_from_data(activation_dataset_train, device="cpu")

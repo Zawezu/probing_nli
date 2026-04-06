@@ -35,6 +35,7 @@ SPLITS: list[str] = ["train", "test", "val"]
 EXPERIMENT_RESULTS_FOLDER = "./experiment_results"
 PLOTS_FOLDER = "./plots"
 PROBES_FOLDER = "./probes"
+
 PROBING_TASKS: list[str] = ["standard", "control", "disjunct_control"]
 
 # os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
