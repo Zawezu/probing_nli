@@ -5,7 +5,7 @@ from torch import Tensor
 import torch as t
 from sklearn.metrics import confusion_matrix
 
-from activations import ActivationSaver, ActivationDataset
+from activations import ActivationDataset, get_number_of_layers_from_file
 from probes import get_probe
 from experiment_common_code import ExperimentResult
 
@@ -36,13 +36,11 @@ def run_full_experiment(
         experiment_number, language, probing_task, probe_type, model_name
     )
 
-    olmo_activation_loader: ActivationSaver = ActivationSaver("olmo_model")
-
     # If num_layers is specified, run experiment on those layers. Otherwise get the number of layers automatically
     if num_layers:
         layers: list[int] = list(range(num_layers))
     else:
-        layers: list[int] = list(range(olmo_activation_loader.get_number_of_layers()))
+        layers = list(range(get_number_of_layers_from_file(model_name)))
 
     # Run a sub-experiment in each layer
     for layer_num in layers:

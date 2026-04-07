@@ -199,20 +199,15 @@ class ActivationSaver:
         if self.hf_model is not None:
             return len(self.hf_model.model.layers)
         else:
-            n_layers_txt_filepath: str = self.get_n_layers_txt_filepath()
             print(
-                f"Model not loaded. Getting the number of layers from {n_layers_txt_filepath}"
+                f"Model not loaded. Getting the number of layers from {get_n_layers_txt_filepath(self.model_name)}"
             )
             try:
-                with open(n_layers_txt_filepath, "r") as file:
-                    return int(file.readline())
+                return get_number_of_layers_from_file(self.model_name)
             except FileNotFoundError:
                 print("Could not find . Loading model")
                 self.load_model()
                 return self.get_number_of_layers()
-
-    def get_n_layers_txt_filepath(self) -> str:
-        return f"{ACTIVATIONS_FOLDER}/{self.model_name}/n_layers.txt"
 
     @staticmethod
     def generate_prompt(sent_a, sent_b, language) -> str:
@@ -223,6 +218,15 @@ class ActivationSaver:
                 return f"Premisa: {sent_a}. Hipótesis: {sent_b}. ¿Estas frases implican, contradicen o son neutrales entre sí?"
             case _:
                 raise KeyError("Invalid language passed")
+
+
+def get_number_of_layers_from_file(model_name):
+    with open(get_n_layers_txt_filepath(model_name), "r") as file:
+        return int(file.readline())
+
+
+def get_n_layers_txt_filepath(model_name) -> str:
+    return f"{ACTIVATIONS_FOLDER}/{model_name}/n_layers.txt"
 
 
 class ActivationDataset(Dataset):
@@ -426,8 +430,7 @@ def merge_activation_batches(
     # Find all batch files for this layer, sorted numerically by batch number
     pattern: str = f"layer{layer_num}_batch*.pt"
     batch_files: list[Path] = sorted(
-        directory.glob(pattern),
-        key=lambda p: int(p.stem.split("_batch")[1])
+        directory.glob(pattern), key=lambda p: int(p.stem.split("_batch")[1])
     )
 
     if not batch_files:
