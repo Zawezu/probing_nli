@@ -29,6 +29,12 @@ ACTIVATIONS_FOLDER = "./data/activations"
 
 # Other constants
 LANGUAGES: list[str] = ["en", "es"]
+LANGUAGE_FULL_NAME_MAP: dict[str, str] = {
+    "en": "English",
+    "es": "Spanish",
+    "en→es": "trained in English, tested in Spanish",
+    "es→en": "trained in Spanish, tested in English",
+}
 SPLITS: list[str] = ["train", "test", "val"]
 
 # Experiment constants

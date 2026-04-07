@@ -247,7 +247,7 @@ def create_control_labels(
         create_disjunct_labels(dataset_dict, unique_labels, amount_per_label)
 
 
-def create_merged_json() -> None:
+def create_merged_json(save=False) -> None:
     merged_dataset_dict: dict[str, dict[str, str | int]] = {}
 
     for language in LANGUAGES:
@@ -281,13 +281,14 @@ def create_merged_json() -> None:
     create_control_labels(merged_dataset_dict, disjunct=True)
 
     # print(merged_dataset_dict)
-
-    with open(MERGED_SICK_FILEPATH, "w", encoding="utf-8") as f:
-        f.write(json.dumps(merged_dataset_dict, ensure_ascii=False, indent=4))
+    if save:
+        print(f"Saving merged SICK dataset to {MERGED_SICK_FILEPATH}")
+        with open(MERGED_SICK_FILEPATH, "w", encoding="utf-8") as f:
+            f.write(json.dumps(merged_dataset_dict, ensure_ascii=False, indent=4))
 
 
 if __name__ == "__main__":
-    create_merged_json()
+    create_merged_json(save=False)
 
     # for language in LANGUAGES:
     #     print(language)

@@ -84,8 +84,8 @@ def run_full_experiment(
         # Get test predictions for generating the metrics
         test_preds: Tensor = probe.pred(activation_dataset_test.activations)  # type: ignore
 
-        print(f"First few test labels: {activation_dataset_test.labels[:20]}")
-        print(f"First few test preds:  {test_preds}")
+        # print(f"First few test labels: {activation_dataset_test.labels[:20]}")
+        # print(f"First few test preds:  {test_preds}")
 
         # Save confusion matrix of test predictions
         exp_result.append_metric(

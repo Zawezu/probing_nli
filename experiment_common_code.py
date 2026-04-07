@@ -9,7 +9,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from common_constants import EXPERIMENT_RESULTS_FOLDER, PLOTS_FOLDER, LABEL_MAP
+from common_constants import (
+    EXPERIMENT_RESULTS_FOLDER,
+    PLOTS_FOLDER,
+    LABEL_MAP,
+    LANGUAGE_FULL_NAME_MAP,
+)
 
 mlp_training_parameters: dict[str, float | int] = {
     "learning_rate": 0.001,
@@ -18,9 +23,9 @@ mlp_training_parameters: dict[str, float | int] = {
     "epochs": 10,
 }
 
-label_names_list: list[str] = [""] * len(LABEL_MAP)
+class_names_list: list[str] = [""] * len(LABEL_MAP)
 for label_str, label_idx in LABEL_MAP.items():
-    label_names_list[label_idx] = label_str
+    class_names_list[label_idx] = label_str
 
 
 class ExperimentResult:
@@ -316,16 +321,20 @@ def show_plots(
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
 
+    extended_class_names_list: list[str] = class_names_list + [
+        "all"
+    ]  # This last element represents any label.
+
     if "per_class" in metric:
-        labels_ids: list[int] = list(LABEL_MAP.values())
+        class_ids: list[int] = list(LABEL_MAP.values())
     else:
-        labels_ids = [-1]
+        class_ids = [-1]
 
     # Validate that specified characteristics are valid
     valid_characteristics: list[str] = [
         "model_name",
         "split",
-        "label_id",
+        "class",
         "language",
         "probing_task",
     ]
@@ -342,14 +351,14 @@ def show_plots(
 
     # Generate all combinations of all characteristics
     all_combinations: list[dict[str, Any]] = []
-    for model_name, split, label_id, language, probing_task in product(
-        model_names, splits, labels_ids, languages, probing_tasks
+    for model_name, split, class_id, language, probing_task in product(
+        model_names, splits, class_ids, languages, probing_tasks
     ):
         all_combinations.append(
             {
                 "model_name": model_name,
                 "split": split,
-                "label_id": label_id,
+                "class": extended_class_names_list[class_id],
                 "language": language,
                 "probing_task": probing_task,
             }
@@ -372,12 +381,12 @@ def show_plots(
         )
 
         # Create plot request
-        plot_request = {
+        line_request = {
             "exp_result": exp_result,
             "split": combo["split"],
-            "label_id": combo["label_id"],
+            "class": combo["class"],
         }
-        plots_dict[key].append(plot_request)
+        plots_dict[key].append(line_request)
 
     # Convert grouped plots to list format
     plots_to_make: list[list[dict]] = list(plots_dict.values())
@@ -431,11 +440,11 @@ def plot_metrics_by_group(
         all_values: list[float] = []
         y_axis_margin = 0.1
 
-        for group_of_plot_requests in plots_to_make:
-            for plot_request in group_of_plot_requests:
-                results_for_determining_axis: list[float | list[float]] = plot_request[
+        for group_of_line_requests in plots_to_make:
+            for line_request in group_of_line_requests:
+                results_for_determining_axis: list[float | list[float]] = line_request[
                     "exp_result"
-                ].metrics[plot_request["split"]][metric]
+                ].metrics[line_request["split"]][metric]
                 if isinstance(results_for_determining_axis[0], float):
                     all_values.extend(results_for_determining_axis)  # type: ignore
                 else:
@@ -459,26 +468,29 @@ def plot_metrics_by_group(
     ]
 
     # Plot each group
-    for plot_idx, group_of_plot_requests in enumerate(plots_to_make):
+    for plot_idx, group_of_line_requests in enumerate(plots_to_make):
         row_idx: int = plot_idx // cols
         col_idx: int = plot_idx % cols
         ax = axs[row_idx, col_idx]
 
         # Collect all attributes for each line in this plot
-        line_attributes: list[dict[str, str]] = []
+        attrs_per_line: list[dict[str, str]] = []
 
-        for plot_request in group_of_plot_requests:
+        for line_request in group_of_line_requests:
             attrs: dict[str, str] = {
-                "language": plot_request["exp_result"].language,
-                "probing_task": plot_request["exp_result"].probing_task,
-                "probe_type": plot_request["exp_result"].probe_type,
-                "model_name": plot_request["exp_result"].model_name,
-                "split": plot_request["split"],
+                "language": LANGUAGE_FULL_NAME_MAP[line_request["exp_result"].language],
+                "probing_task": line_request["exp_result"].probing_task,
+                "probe_type": line_request["exp_result"].probe_type,
+                "model_name": line_request["exp_result"].model_name,
+                "split": line_request["split"],
                 "metric": metric,
+                "label": line_request["class"],
             }
-            if "per_class" in metric:
-                attrs["label"] = label_names_list[plot_request["label_id"]]
-            line_attributes.append(attrs)
+
+            # Replace all underscores by spaces to create a nicer plot
+            for key in attrs.keys():
+                attrs[key] = attrs[key].replace("_", " ")
+            attrs_per_line.append(attrs)
 
         # Determine which attributes are common and which vary across all lines
         common_attrs: dict[str, str] = {}
@@ -486,7 +498,7 @@ def plot_metrics_by_group(
 
         for attr_key in attribute_sequence:
             if not (attr_key == "label" and "per_class" not in metric):
-                values: list[str] = [attrs[attr_key] for attrs in line_attributes]
+                values: list[str] = [attrs[attr_key] for attrs in attrs_per_line]
                 if len(set(values)) == 1:
                     # This attribute is common across all lines
                     common_attrs[attr_key] = values[0]
@@ -501,26 +513,28 @@ def plot_metrics_by_group(
             common_attrs[key] for key in attribute_sequence if key in common_attrs
         ]
         different_parts: list[str] = [
-            key for key in attribute_sequence if key in varying_attrs
+            key.replace("_", " ") + "s"
+            for key in attribute_sequence
+            if key in varying_attrs
         ]
 
         if different_parts:
-            title: str = f"Results of {', '.join(common_parts)} for different {', '.join(different_parts)} over the {xlabel}s"
+            title: str = f"Results of {', '.join(common_parts)} for different {', '.join(different_parts)} over the {xlabel.lower()}s"
         else:
             title = f"Results of {', '.join(common_parts)} over the {xlabel}s"
 
         ax.set_title(title, fontsize=7)
 
         # Plot each line with intelligently generated legend label
-        for i, plot_request in enumerate(group_of_plot_requests):
-            results: list[float | list[float]] = plot_request["exp_result"].metrics[
-                plot_request["split"]
+        for i, line_request in enumerate(group_of_line_requests):
+            results: list[float | list[float]] = line_request["exp_result"].metrics[
+                line_request["split"]
             ][metric]
             layers = range(len(results))
 
             # Generate legend label with only varying attributes
             legend_parts: list[str] = [
-                line_attributes[i][key]
+                attrs_per_line[i][key]
                 for key in attribute_sequence
                 if key in varying_attrs
             ]
@@ -529,14 +543,16 @@ def plot_metrics_by_group(
             if "per_class" in metric:
                 # If we are dealing with a per-class metric, we add a plot for the requested label id
                 results_for_this_label: list[float] = [
-                    result[plot_request["label_id"]] for result in results
-                ]  # type: ignore
+                    result[LABEL_MAP[line_request["class"]]]
+                    for result in results  # type: ignore
+                ]
                 ax.plot(layers, results_for_this_label, marker="o", label=legend_label)
             else:
                 # If we are dealing with a non-per-class metric, we simply plot the results
                 ax.plot(layers, results, marker="o", label=legend_label)
 
         ax.set_xlabel(xlabel)
+        ax.set_ylabel(metric.replace("_", " "))
         ax.grid(True, alpha=0.3)
         ax.legend(loc="lower left")
         ax.set_ylim(y_axis_range)
@@ -599,7 +615,7 @@ def plot_confusion_matrix(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Create title
-    title: str = f"Confusion matrix for {exp_result.probe_type} probe in layer {layer_num} of {exp_result.model_name} trained with {exp_result.language} activations of the {split} dataset and {exp_result.probing_task} labels"
+    title: str = f"Confusion matrix for {exp_result.probe_type} probe in layer {layer_num} of {exp_result.model_name} trained with {LANGUAGE_FULL_NAME_MAP[exp_result.language]} activations of the {split} dataset and {exp_result.probing_task} labels"
 
     # Plot heatmap
     sns.heatmap(
@@ -607,8 +623,8 @@ def plot_confusion_matrix(
         annot=True,
         fmt="d",
         cmap="Blues",
-        xticklabels=label_names_list,  # type: ignore
-        yticklabels=label_names_list,  # type: ignore
+        xticklabels=class_names_list,  # type: ignore
+        yticklabels=class_names_list,  # type: ignore
         cbar_kws={"label": "Count"},
         ax=ax,
     )
