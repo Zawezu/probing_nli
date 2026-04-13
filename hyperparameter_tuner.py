@@ -1,6 +1,8 @@
 import itertools
 from sklearn.metrics import f1_score
 from icecream import ic
+import json
+from pathlib import Path
 
 from activations import get_number_of_layers_from_file, ActivationDataset
 from common_constants import MODEL_NAMES, LANGUAGES
@@ -51,7 +53,7 @@ def optimise_hyperparameters(
             best_f1 = val_f1
             best_params = params
 
-    print(f"Best hyperparameters: {best_params} (val macro-F1: {best_f1:.4f})")
+    # print(f"Best hyperparameters: {best_params} (val macro-F1: {best_f1:.4f})")
     return best_params
 
 
@@ -105,21 +107,59 @@ def optimise_hyperparameters_all_layers(
     return best_params_per_layer
 
 
+def save_hyperparameters(
+    all_hyperparameters: dict,
+    output_file: str = "hyperparameters.json",
+) -> str:
+    """
+    Save aggregated hyperparameters to a JSON file.
+
+    Args:
+        all_hyperparameters: Dictionary with structure:
+            {model_name: {language: {layer_num: {hyperparams}}}}
+        output_file: Path to save the JSON file
+
+    Returns:
+        Path to the saved file
+    """
+    output_path = Path(output_file)
+
+    # Convert int keys to strings for JSON serialization
+    serializable_hyperparams = {}
+    for model_name, model_data in all_hyperparameters.items():
+        serializable_hyperparams[model_name] = {}
+        for language, lang_data in model_data.items():
+            serializable_hyperparams[model_name][language] = {
+                str(layer_num): params for layer_num, params in lang_data.items()
+            }
+
+    with open(output_path, "w") as f:
+        json.dump(serializable_hyperparams, f, indent=2)
+
+    print(f"Hyperparameters saved to {output_path}")
+    return str(output_path)
+
+
 if __name__ == "__main__":
     model_names: list[str] = MODEL_NAMES
     languages: list[str] = LANGUAGES
     num_layers: int | None = None
 
-    custom = True
+    custom = False
     if custom:
         model_names = ["olmo_model"]
         languages = ["en"]
-        num_layers = 3
+        num_layers = 1
         print("Using custom configuration")
 
     ic(custom, model_names, languages, num_layers)
 
+    # Aggregate hyperparameters for all model/language combinations
+    all_hyperparameters: dict = {}
+
     for model_name in model_names:
+        all_hyperparameters[model_name] = {}
+
         if num_layers is None:
             num_layers_for_this_model: int = get_number_of_layers_from_file(model_name)
         else:
@@ -129,4 +169,10 @@ if __name__ == "__main__":
             hyperparameters: dict = optimise_hyperparameters_all_layers(
                 model_name, language, num_layers_for_this_model
             )
-            print(hyperparameters)
+            print(
+                f"Best hyperparameters for {model_name} in {language}:\n{hyperparameters}"
+            )
+            all_hyperparameters[model_name][language] = hyperparameters
+
+    # Save all hyperparameters to JSON
+    save_hyperparameters(all_hyperparameters)

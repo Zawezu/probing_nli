@@ -2,8 +2,16 @@ import torch as t
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from pathlib import Path
-from common_constants import PROBES_FOLDER
 import pickle
+import json
+
+from common_constants import PROBES_FOLDER
+
+# Ignore convergence warnings
+from sklearn.exceptions import ConvergenceWarning
+import warnings
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 
 mlp_training_parameters: dict[str, float | int] = {
@@ -15,7 +23,7 @@ mlp_training_parameters: dict[str, float | int] = {
 
 
 class LRProbe:
-    """Sklearn-based logistic regression probe without PyTorch."""
+    """Sklearn-based logistic regression probe"""
 
     def __init__(self, lr_model, scaler_mean, scaler_scale) -> None:
         """
@@ -78,10 +86,27 @@ class LRProbe:
             max_iter=1000,
             class_weight="balanced",
             solver="lbfgs",  # saga does not work well as a solver. It takes a very long time to fit and does not converge after 1000 iterations.
+            warm_start=True,  # This lets me retrain the model on another language without starting from scratch
         )
         lr_model.fit(X_scaled, y)
 
         return LRProbe(lr_model, scaler.mean_, scaler.scale_)
+
+    def refit(self, new_dataset, iterations):
+        """
+        Continue training the existing model on new data.
+        """
+        acts, labels = (new_dataset.activations, new_dataset.labels)
+        X = acts.cpu().float().numpy()
+        y = labels.cpu().float().numpy()
+
+        # Use the existing scaler to maintain feature consistency
+        X_scaled = (X - self.scaler_mean) / self.scaler_scale
+
+        # Update max_iter for this specific run
+        self.lr_model.max_iter = iterations
+
+        self.lr_model.fit(X_scaled, y)
 
 
 def get_probe_filename(
@@ -191,7 +216,7 @@ def get_probe(
     model_name,
     activation_dataset_train,
     force_probe_creation,
-    device,
+    hyperparameters_file: str = "hyperparameters.json",
 ):
     if (not force_probe_creation) and (
         probe_exists(language, layer_num, probing_task, probe_type, model_name)
@@ -209,7 +234,14 @@ def get_probe(
         print("Creating probe")
         match probe_type:
             case "lr":
-                probe = LRProbe.create_from_data(activation_dataset_train)
+                hyperparams = load_hyperparameters(
+                    model_name, language, layer_num, hyperparameters_file
+                )
+                C = hyperparams.get("C", 0.1)
+                fit_intercept = hyperparams.get("fit_intercept", False)
+                probe = LRProbe.create_from_data(
+                    activation_dataset_train, C, fit_intercept
+                )
             # MLP not currently implemented
             # case "mlp":
             #     probe = MLPProbe.create_from_data(activation_dataset_train, 128, device)
@@ -219,3 +251,49 @@ def get_probe(
         save_probe(probe, language, layer_num, probing_task, probe_type, model_name)
 
     return probe
+
+
+def load_hyperparameters(
+    model_name: str,
+    language: str,
+    layer_num: int,
+    hyperparameters_file: str = "hyperparameters.json",
+) -> dict:
+    """
+    Load hyperparameters for a specific model, language, and layer.
+
+    Args:
+        model_name: Name of the model (e.g., 'olmo_model')
+        language: Language code (e.g., 'en', 'es')
+        layer_num: Layer number
+        hyperparameters_file: Path to the hyperparameters JSON file
+
+    Returns:
+        Dictionary with hyperparameters (e.g., {'C': 0.1, 'fit_intercept': True})
+
+    Raises:
+        FileNotFoundError: If hyperparameters file doesn't exist
+        KeyError: If the specified model/language/layer combination doesn't exist
+    """
+    filepath = Path(hyperparameters_file)
+
+    if not filepath.exists():
+        raise FileNotFoundError(f"Hyperparameters file not found at {filepath}. ")
+
+    with open(filepath, "r") as f:
+        all_hyperparameters = json.load(f)
+
+    layer_key = str(layer_num)
+
+    if model_name not in all_hyperparameters:
+        raise KeyError(f"Model '{model_name}' not found in hyperparameters")
+    if language not in all_hyperparameters[model_name]:
+        raise KeyError(
+            f"Language '{language}' not found for model '{model_name}' in hyperparameters"
+        )
+    if layer_key not in all_hyperparameters[model_name][language]:
+        raise KeyError(
+            f"Layer {layer_num} not found for {model_name}/{language} in hyperparameters"
+        )
+
+    return all_hyperparameters[model_name][language][layer_key]

@@ -36,12 +36,14 @@ class ExperimentResult:
         probing_task: str,
         probe_type: str,
         model_name: str,
+        extra_iter_num: int = 0,
     ) -> None:
         self.experiment_number: int = experiment_number
         self.language: str = language
         self.probing_task: str = probing_task
         self.probe_type: str = probe_type
         self.model_name: str = model_name
+        self.extra_iter_num: int = extra_iter_num
 
         self.metrics: dict[str, dict[str, Any]] = {"train": {}, "test": {}}
 
@@ -77,7 +79,9 @@ class ExperimentResult:
                 continue
 
             # Accuracy: sum of diagonal / sum of all elements
-            self.append_metric(split, "accuracy", float(np.trace(cm) / np.sum(cm)))
+            total_sum = np.sum(cm)
+            accuracy = float(np.trace(cm) / total_sum if total_sum > 0 else 0.0)
+            self.append_metric(split, "accuracy", accuracy)
 
             # Per-class metrics
             num_classes: int = cm.shape[0]
@@ -88,15 +92,17 @@ class ExperimentResult:
             for class_idx in range(num_classes):
                 # Recall (sensitivity/true positive rate): TP / (TP + FN)
                 # TP is diagonal, FN is rest of row
+                row_sum = np.sum(cm[class_idx, :])
                 recall: float = float(
-                    cm[class_idx, class_idx] / np.sum(cm[class_idx, :])
+                    cm[class_idx, class_idx] / row_sum if row_sum > 0 else 0.0
                 )
                 per_class_recall.append(recall)
 
                 # Precision: TP / (TP + FP)
                 # TP is diagonal, FP is rest of column
+                col_sum = np.sum(cm[:, class_idx])
                 precision: float = float(
-                    cm[class_idx, class_idx] / np.sum(cm[:, class_idx])
+                    cm[class_idx, class_idx] / col_sum if col_sum > 0 else 0.0
                 )
                 per_class_precision.append(precision)
 
@@ -233,7 +239,11 @@ class ExperimentResult:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         filepath: Path = save_dir / self.get_filename(
-            self.language, self.probing_task, self.probe_type, self.model_name
+            self.language,
+            self.probing_task,
+            self.probe_type,
+            self.model_name,
+            self.extra_iter_num,
         )
         with open(filepath, "wb") as f:
             pickle.dump(self, f)
@@ -251,10 +261,14 @@ class ExperimentResult:
 
     @staticmethod
     def get_filename(
-        language: str, probing_task: str, probe_type: str, model_name: str
+        language: str,
+        probing_task: str,
+        probe_type: str,
+        model_name: str,
+        extra_iter_num: int,
     ) -> str:
         """Generate filename based on experiment parameters."""
-        return f"{language},{probing_task},{probe_type},{model_name}.pkl"
+        return f"{language},{probing_task},{probe_type},{model_name},{extra_iter_num}_extra_iters.pkl"
 
     @staticmethod
     def get_from_file(
@@ -263,6 +277,7 @@ class ExperimentResult:
         probing_task: str,
         probe_type: str,
         model_name: str,
+        extra_iter_num: int = 0,
     ) -> "ExperimentResult":
         """
         Load an ExperimentResult from a pickle file.
@@ -273,47 +288,22 @@ class ExperimentResult:
         Returns:
             The loaded ExperimentResult object
         """
-        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name)}"
+        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num)}"
         with open(filepath, "rb") as f:
             return pickle.load(f)
 
 
-def calculate_y_axis_range(
-    experiments: list[ExperimentResult],
-    metric_types: list[str],
-) -> tuple[float, float]:
-    """
-    Calculate the y-axis range needed to encompass all values across all experiments and metric types.
-
-    Args:
-        experiments: List of ExperimentResult objects
-        metric_types: List of metric type strings (attribute names)
-
-    Returns:
-        Tuple of (min_value, max_value) for the y-axis range
-    """
-    all_values: list[float] = []
-    for experiment in experiments:
-        for metric_type in metric_types:
-            results: list[float] = getattr(experiment, metric_type, [])
-            if results:
-                all_values.extend(results)
-
-    if not all_values:
-        return (0, 1)
-
-    return (min(all_values), max(all_values))
-
-
 def show_plots(
+    experiment_number: int,
     model_names: list[str],
     splits: list[str],
     languages: list[str],
     probing_tasks: list[str],
-    probe_type: str,
-    experiment_number: int,
-    metric: str,
+    extra_iter_nums: list[int] = [0],
+    probe_type: str = "lr",
+    metric: str = "accuracy",
     separate_chars_within_plot: list[str] = ["language", "probing_task"],
+    y_axis_range: tuple[float, float] | None = None,
     show: bool = True,
     save: bool = False,
     filename: str = "",
@@ -337,10 +327,7 @@ def show_plots(
         "class",
         "language",
         "probing_task",
-    ]
-
-    separate_chars_outside_plot: list[str] = [
-        c for c in valid_characteristics if c not in separate_chars_within_plot
+        "extra_iter_num",
     ]
 
     for char in separate_chars_within_plot:
@@ -349,10 +336,14 @@ def show_plots(
                 f"Invalid characteristic: {char}. Must be one of {valid_characteristics}"
             )
 
+    separate_chars_outside_plot: list[str] = [
+        c for c in valid_characteristics if c not in separate_chars_within_plot
+    ]
+
     # Generate all combinations of all characteristics
     all_combinations: list[dict[str, Any]] = []
-    for model_name, split, class_id, language, probing_task in product(
-        model_names, splits, class_ids, languages, probing_tasks
+    for model_name, split, class_id, language, probing_task, extra_iter_num in product(
+        model_names, splits, class_ids, languages, probing_tasks, extra_iter_nums
     ):
         all_combinations.append(
             {
@@ -361,6 +352,7 @@ def show_plots(
                 "class": extended_class_names_list[class_id],
                 "language": language,
                 "probing_task": probing_task,
+                "extra_iter_num": extra_iter_num,
             }
         )
 
@@ -378,6 +370,7 @@ def show_plots(
             combo["probing_task"],
             probe_type,
             combo["model_name"],
+            combo["extra_iter_num"],
         )
 
         # Create plot request
@@ -391,7 +384,7 @@ def show_plots(
     # Convert grouped plots to list format
     plots_to_make: list[list[dict]] = list(plots_dict.values())
 
-    plot_metrics_by_group(plots_to_make, metric, show, save, filename)
+    plot_metrics_by_group(plots_to_make, metric, show, save, filename, y_axis_range)
 
 
 def plot_metrics_by_group(
@@ -400,8 +393,8 @@ def plot_metrics_by_group(
     show: bool,
     save: bool,
     filename: str,
+    y_axis_range: tuple[float, float] | None,
     xlabel: str = "Layer",
-    y_axis_range: tuple[float, float] | None = None,
     scale: int = 1,
 ) -> None:
     """
@@ -463,6 +456,7 @@ def plot_metrics_by_group(
         "label",
         "probe_type",
         "model_name",
+        "extra_iter_num",
         "split",
         "metric",
     ]
@@ -482,6 +476,7 @@ def plot_metrics_by_group(
                 "probing_task": line_request["exp_result"].probing_task,
                 "probe_type": line_request["exp_result"].probe_type,
                 "model_name": line_request["exp_result"].model_name,
+                "extra_iter_num": line_request["exp_result"].extra_iter_num,
                 "split": line_request["split"],
                 "metric": metric,
                 "label": line_request["class"],
@@ -489,7 +484,7 @@ def plot_metrics_by_group(
 
             # Replace all underscores by spaces to create a nicer plot
             for key in attrs.keys():
-                attrs[key] = attrs[key].replace("_", " ")
+                attrs[key] = str(attrs[key]).replace("_", " ")
             attrs_per_line.append(attrs)
 
         # Determine which attributes are common and which vary across all lines
@@ -513,7 +508,7 @@ def plot_metrics_by_group(
             common_attrs[key] for key in attribute_sequence if key in common_attrs
         ]
         different_parts: list[str] = [
-            key.replace("_", " ") + "s"
+            str(key).replace("_", " ") + "s"
             for key in attribute_sequence
             if key in varying_attrs
         ]
@@ -525,7 +520,8 @@ def plot_metrics_by_group(
 
         ax.set_title(title, fontsize=7)
 
-        # Plot each line with intelligently generated legend label
+        # Prepare line data with average values for sorting
+        lines_to_plot: list[dict] = []
         for i, line_request in enumerate(group_of_line_requests):
             results: list[float | list[float]] = line_request["exp_result"].metrics[
                 line_request["split"]
@@ -546,15 +542,43 @@ def plot_metrics_by_group(
                     result[LABEL_MAP[line_request["class"]]]
                     for result in results  # type: ignore
                 ]
-                ax.plot(layers, results_for_this_label, marker="o", label=legend_label)
+                average_value: float = float(np.mean(results_for_this_label))
+                lines_to_plot.append(
+                    {
+                        "layers": layers,
+                        "results": results_for_this_label,
+                        "legend_label": legend_label,
+                        "average_value": average_value,
+                    }
+                )
             else:
                 # If we are dealing with a non-per-class metric, we simply plot the results
-                ax.plot(layers, results, marker="o", label=legend_label)
+                average_value: float = float(np.mean(results))
+                lines_to_plot.append(
+                    {
+                        "layers": layers,
+                        "results": results,
+                        "legend_label": legend_label,
+                        "average_value": average_value,
+                    }
+                )
+
+        # Sort lines by average value in descending order (higher values first)
+        lines_to_plot.sort(key=lambda x: x["average_value"], reverse=True)
+
+        # Plot each line in sorted order
+        for line_data in lines_to_plot:
+            ax.plot(
+                line_data["layers"],
+                line_data["results"],
+                marker="o",
+                label=line_data["legend_label"],
+            )
 
         ax.set_xlabel(xlabel)
         ax.set_ylabel(metric.replace("_", " "))
         ax.grid(True, alpha=0.3)
-        ax.legend(loc="lower left")
+        ax.legend(loc="upper left")
         ax.set_ylim(y_axis_range)
 
     # Hide unused subplots
