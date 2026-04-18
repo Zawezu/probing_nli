@@ -1,5 +1,6 @@
 models/
 data/activations/
+data/responses
 probes/
 experiment_results/
 plots/

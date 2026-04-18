@@ -68,7 +68,6 @@ def run_full_experiment(
             model_name,
             activation_dataset_train,
             force_probe_creation,
-            device,
         )
 
         # Get train predictions for generating the metrics

@@ -4,11 +4,52 @@ from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
 from tqdm import tqdm
 from pathlib import Path
+import json
 
 from sick import SICKMergedDataset
 from common_constants import ACTIVATIONS_FOLDER, MODELS_FOLDER
 
 device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
+
+CHAT_TEMPLATES = {
+    "olmo_model": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n"
+        "{% elif message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n"
+        "{% elif message['role'] == 'assistant' %}<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n"
+        "{% endif %}{% endfor %}"
+        "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
+    ),
+    "tiny_aya_global": (
+        "{{ bos_token }}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+        "{% elif message['role'] == 'user' %}<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+        "{% elif message['role'] == 'assistant' %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+        "{% endif %}{% endfor %}"
+        "{% if add_generation_prompt %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{% endif %}"
+    ),
+}
+
+SYSTEM_PROMPTS = {
+    "en": "You are a textual entailment classifier. Always respond with exactly one word: entailment, contradiction, or neutral.",
+    "es": "Eres un clasificador de implicación textual. Responde siempre con una sola palabra: implicación, contradicción o neutral.",
+    "jp": "あなたはテキスト含意分類器です。常に一言で答えてください：含意、矛盾、または中立。",
+}
+FEW_SHOT_EXAMPLES = {
+    "en": (
+        "Premise: A dog is running.\nHypothesis: An animal is moving.\nClassify: entailment, contradiction, or neutral.",
+        "entailment",
+    ),
+    "es": (
+        "Premisa: Un perro está corriendo.\nHipótesis: Un animal se está moviendo.\nClasifica: implicación, contradicción o neutral.",
+        "implicación",
+    ),
+    "jp": (
+        "前提：犬が走っている。\n仮説：動物が動いている。\n一言で分類してください：含意、矛盾、または中立。",
+        "含意",
+    ),
+}
 
 
 class SpecialCase:
@@ -73,6 +114,33 @@ class ActivationSaver:
             f"Saved samples for batch {batch_id} to {get_activations_filepath(self.model_name, language, split, 'n', batch_id)}"
         )
 
+    def _save_batch_responses(
+        self,
+        messages_batch: list[list[dict]],
+        responses: list[str],
+        language: str,
+        split: str,
+        batch_id: int,
+    ) -> None:
+        responses_filepath = get_responses_filepath(
+            self.model_name, language, split, batch_id
+        )
+
+        path_obj = Path(responses_filepath)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        records = [
+            {"message": messages, "response": response}
+            for messages, response in zip(messages_batch, responses)
+        ]
+
+        with open(responses_filepath, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+
+        print(
+            f"Saved {len(records)} responses for batch {batch_id} to {responses_filepath}"
+        )
+
     def generate_activations(
         self,
         language: str,
@@ -114,6 +182,7 @@ class ActivationSaver:
         batch_id: int = start_from_batch
 
         len_dataloader: int = len(dataloader)
+        print(len(dataloader))
         try:
             for batch_num, (
                 sentence_tuple_batch,
@@ -129,22 +198,32 @@ class ActivationSaver:
 
                 batch_acts_by_layer: dict[int, t.Tensor] = {}
 
-                # Create prompts for all sentences in the batch
-                prompts: list[str] = [
-                    self.generate_prompt(sent_a, sent_b, language)
-                    for sent_a, sent_b in zip(
-                        sentence_tuple_batch[0], sentence_tuple_batch[1]
-                    )
-                ]
-                # print(prompts)
-
-                # Tokenize entire batch at once
-                tokens = self.tokenizer(prompts, return_tensors="pt", padding=True).to(
-                    device
+                messages_batch = self.generate_messages_batch(
+                    sentence_tuple_batch, language
                 )
 
+                tokens = self.tokenizer.apply_chat_template(
+                    messages_batch,
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    return_dict=True,
+                    padding=True,
+                ).to(device)
+
                 with t.no_grad():
-                    self.hf_model(**tokens)
+                    generated_ids = self.hf_model.generate(
+                        input_ids=tokens.input_ids,
+                        attention_mask=tokens.attention_mask,
+                        max_new_tokens=5,
+                        num_beams=1,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+
+                input_length = tokens.input_ids.shape[1]
+                trimmed_responses = self.tokenizer.batch_decode(
+                    generated_ids[:, input_length:],  # slice off the prompt tokens
+                    skip_special_tokens=True,
+                )
 
                 # Extract activations for all samples in the batch
                 for layer_num in range(n_layers):
@@ -169,6 +248,13 @@ class ActivationSaver:
                         split,
                         batch_id,
                     )
+                    self._save_batch_responses(
+                        messages_batch,
+                        trimmed_responses,
+                        language,
+                        split,
+                        batch_id,
+                    )
                 batch_id += 1
 
                 if (
@@ -185,10 +271,14 @@ class ActivationSaver:
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_filepath, local_files_only=True
         )
+
+        self.tokenizer.chat_template = CHAT_TEMPLATES[self.model_name]
+
         self.hf_model = AutoModelForCausalLM.from_pretrained(
             model_filepath, local_files_only=True
         ).to(device)  # type: ignore
-        n_layers_txt_filepath = self.get_n_layers_txt_filepath()
+
+        n_layers_txt_filepath: str = get_n_layers_txt_filepath(self.model_name)
         # Create parent directory if it doesn't exist
         path_obj = Path(n_layers_txt_filepath)
         path_obj.parent.mkdir(parents=True, exist_ok=True)
@@ -213,11 +303,50 @@ class ActivationSaver:
     def generate_prompt(sent_a, sent_b, language) -> str:
         match language:
             case "en":
-                return f"Premise: {sent_a}. Hypothesis: {sent_b}. Do these sentences entail, contradict, or are neutral to each other?"
+                # return (
+                #     f"Premise: {sent_a}\nHypothesis: {sent_b}\n"
+                #     f"Classify the relationship between the premise and hypothesis. "
+                #     f"Reply with a single word: entailment, contradiction, or neutral."
+                # )
+                return (
+                    f"Premise: {sent_a}\nHypothesis: {sent_b}\n"
+                    f"Classify: entailment, contradiction, or neutral."  # shorter, no prose instruction
+                )
             case "es":
-                return f"Premisa: {sent_a}. Hipótesis: {sent_b}. ¿Estas frases implican, contradicen o son neutrales entre sí?"
+                return (
+                    f"Premisa: {sent_a}\nHipótesis: {sent_b}\n"
+                    f"Clasifica la relación. Responde con una sola palabra: "
+                    f"implicación, contradicción o neutral."
+                )
+            case "jp":
+                return (
+                    f"前提：{sent_a}\n仮説：{sent_b}\n"
+                    f"関係を一言で分類してください：含意、矛盾、または中立。"
+                )
             case _:
-                raise KeyError("Invalid language passed")
+                raise KeyError(f"Language {language} is not supported")
+
+    @staticmethod
+    def generate_messages_batch(
+        sentence_tuple_batch, language: str
+    ) -> list[list[dict]]:
+        system_prompt = SYSTEM_PROMPTS[language]
+        few_shot_user, few_shot_assistant = FEW_SHOT_EXAMPLES[language]
+
+        prompts: list[str] = [
+            ActivationSaver.generate_prompt(sent_a, sent_b, language)
+            for sent_a, sent_b in zip(sentence_tuple_batch[0], sentence_tuple_batch[1])
+        ]
+
+        return [
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": few_shot_user},
+                {"role": "assistant", "content": few_shot_assistant},
+                {"role": "user", "content": p},
+            ]
+            for p in prompts
+        ]
 
 
 def get_number_of_layers_from_file(model_name):
@@ -342,16 +471,27 @@ def get_activations_filepath(
     batch_id: int | str | None,
 ) -> str:
     if layer_num is not None and batch_id is not None:
-        if isinstance(batch_id, "int"):
+        # if type(batch_id) == int:
+        if isinstance(batch_id, int):
             return f"{ACTIVATIONS_FOLDER}/{model_name}/{language}/{split}/layer{layer_num}_batch{batch_id}.pt"
-        elif isinstance(batch_id, "str"):
+        # elif type(batch_id) == str:
+        elif isinstance(batch_id, str):
             return f"{ACTIVATIONS_FOLDER}/{model_name}/{language}/{split}/layer{layer_num}_{batch_id}.pt"
     elif layer_num is not None and batch_id is None:
         return f"{ACTIVATIONS_FOLDER}/{model_name}/{language}/{split}/layer{layer_num}"
     elif layer_num is None and batch_id is not None:
-        raise KeyError("If layer_numb is None, batch_id cannot be None")
+        raise KeyError("If layer_num is None, batch_id cannot be None")
     else:
         return f"{ACTIVATIONS_FOLDER}/{model_name}/{language}/{split}"
+
+
+def get_responses_filepath(
+    model_name: str,
+    language: str,
+    split: str,
+    batch_id: int | str,
+) -> str:
+    return f"./data/responses/{model_name}/{language}/{split}/responses_batch{batch_id}.json"
 
 
 def delete_individual_file(filepath, ignore_substring, actually_delete) -> None:
@@ -465,6 +605,43 @@ def merge_activation_batches(
         f"Merged {len(batch_files)} batch files for {model_name}, {language}, {split}, layer{layer_num}"
     )
     print(f"Merged activations shape: {merged_activations.shape}")
+    print(f"Saved to {merged_filepath}")
+
+    return merged_filepath
+
+
+def merge_response_batches(model_name: str, language: str, split: str) -> str:
+    directory = Path(f"./data/responses/{model_name}/{language}/{split}")
+
+    if not directory.exists():
+        raise FileNotFoundError(f"Directory not found: {directory}")
+
+    pattern = "responses_batch*.json"
+    response_files = sorted(
+        directory.glob(pattern), key=lambda p: int(p.stem.split("_batch")[1])
+    )
+
+    if not response_files:
+        raise FileNotFoundError(
+            f"No response files found for {model_name}/{language}/{split}"
+        )
+
+    all_records: list[dict] = []
+    for response_file in response_files:
+        with open(response_file, "r", encoding="utf-8") as f:
+            all_records.extend(json.load(f))
+
+    merged_filepath = (
+        f"./data/responses/{model_name}/{language}/{split}/responses_merged.json"
+    )
+
+    with open(merged_filepath, "w", encoding="utf-8") as f:
+        json.dump(all_records, f, ensure_ascii=False, indent=2)
+
+    print(
+        f"Merged {len(response_files)} response files for {model_name}, {language}, {split}"
+    )
+    print(f"Total responses: {len(all_records)}")
     print(f"Saved to {merged_filepath}")
 
     return merged_filepath

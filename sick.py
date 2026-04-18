@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset, DataLoader
 import json
 import random
+import csv
 
 from common_constants import (
     SICK_FOLDER,
@@ -11,6 +12,7 @@ from common_constants import (
     LANGUAGES,
     SPLITS,
     MERGED_SICK_FILEPATH,
+    SICK_DIRTY_JP_FILE,
 )
 
 random.seed(42)
@@ -93,6 +95,22 @@ class SICKDirtyDataset(Dataset):
                         self.sentence_pairs.append((sentence_A, sentence_B))
                         self.labels.append(LABEL_MAP[label])
                         self.original_ids.append(pair_ID)
+            case "jp":
+                filepath: str = (
+                    f"./{SICK_FOLDER}/{SICK_DIRTY_FOLDERS['jp']}/{SICK_DIRTY_JP_FILE}"
+                )
+
+                with open(filepath, "r", newline="", encoding="utf-8") as f:
+                    tsv_reader: csv.DictReader[str] = csv.DictReader(f, delimiter="\t")
+                    for row in tsv_reader:
+                        if row["data"] != original_split:
+                            continue
+
+                        self.sentence_pairs.append(
+                            (row["sentence_A_Ja"], row["sentence_B_Ja"])
+                        )
+                        self.labels.append(LABEL_MAP[row["entailment_label_Ja"]])
+                        self.original_ids.append(int(row["pair_ID"]))
 
     def __getitem__(self, i: int) -> tuple[tuple[str, str], int, int]:
         return self.sentence_pairs[i], self.labels[i], self.original_ids[i]
@@ -115,19 +133,22 @@ class SICKMergedDataset(Dataset):
 
         for id, values in merged_dataset_dict.items():
             if values["split"] == split:
-                match language:
-                    case "en":
-                        self.sentence_pairs.append(
-                            (str(values["sentence_a_en"]), str(values["sentence_b_en"]))
-                        )
-                    case "es":
-                        self.sentence_pairs.append(
-                            (str(values["sentence_a_es"]), str(values["sentence_b_es"]))
-                        )
+                self.sentence_pairs.append(
+                    (
+                        str(values[f"sentence_a_{language}"]),
+                        str(values[f"sentence_b_{language}"]),
+                    )
+                )
+
+                # Japanese uses slightly different labels
+                if language == "jp":
+                    standard_label_key = "standard_japanese_label"
+                else:
+                    standard_label_key = "standard_label"
 
                 self.labels.append(
                     {
-                        "standard": int(values["standard_label"]),
+                        "standard": int(values[standard_label_key]),
                         "control": int(values["control_label"]),
                         "disjunct_control": int(values["disjunct_control_label"]),
                     }
@@ -250,6 +271,8 @@ def create_control_labels(
 def create_merged_json(save=False) -> None:
     merged_dataset_dict: dict[str, dict[str, str | int]] = {}
 
+    seen_ids = set()
+
     for language in LANGUAGES:
         for split in SPLITS:
             dataset: SICKDirtyDataset = SICKDirtyDataset(language, split)
@@ -263,10 +286,13 @@ def create_merged_json(save=False) -> None:
 
                 id = str(original_id.item())
 
-                try:
-                    merged_dataset_dict[id]
-                except KeyError:
+                if id not in seen_ids:
+                    #  There are some pairs that are only in Japanese. We skip these
+                    if language == "jp":
+                        continue
+
                     merged_dataset_dict[id] = {}
+                    seen_ids.add(id)
 
                 add_to_dict(
                     merged_dataset_dict[id], f"sentence_a_{language}", sentence_a[0]
@@ -274,7 +300,12 @@ def create_merged_json(save=False) -> None:
                 add_to_dict(
                     merged_dataset_dict[id], f"sentence_b_{language}", sentence_b[0]
                 )
-                add_to_dict(merged_dataset_dict[id], "standard_label", label.item())
+                if language == "jp":
+                    add_to_dict(
+                        merged_dataset_dict[id], "standard_japanese_label", label.item()
+                    )
+                else:
+                    add_to_dict(merged_dataset_dict[id], "standard_label", label.item())
                 add_to_dict(merged_dataset_dict[id], "split", split)
 
     create_control_labels(merged_dataset_dict, disjunct=False)
@@ -288,8 +319,7 @@ def create_merged_json(save=False) -> None:
 
 
 if __name__ == "__main__":
-    create_merged_json(save=False)
-
+    create_merged_json(save=True)
     # for language in LANGUAGES:
     #     print(language)
     #     split= "train"
