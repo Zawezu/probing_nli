@@ -177,7 +177,7 @@ def load_probe(
     with open(filepath, "rb") as f:
         model = pickle.load(f)
 
-    print(f"Probe loaded from {filepath}")
+    # print(f"Probe loaded from {filepath}")
 
     return model
 
@@ -221,7 +221,7 @@ def get_probe(
     if (not force_probe_creation) and (
         probe_exists(language, layer_num, probing_task, probe_type, model_name)
     ):
-        print("Probe already exists. Loading from file...")
+        # print("Probe already exists. Loading from file...")
         probe = load_probe(
             language,
             layer_num,

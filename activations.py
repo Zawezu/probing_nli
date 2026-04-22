@@ -376,57 +376,6 @@ class ActivationDataset(Dataset):
 
         self.activations, self.labels = self.load_activations_from_merged()
 
-    # Outdated function. The new function loads activations from the merged file. Keep but ignore for now
-    # def load_activations(self) -> tuple[Tensor, Tensor]:
-    #     """
-    #     Loads the tensors form the pt files of every batch and puts them into a single unified tensor
-    #     """
-    #     total_activations_list: list[Tensor] = []
-    #     total_labels_list: list[Tensor] = []
-
-    #     batch_id = 0
-    #     i = 0
-    #     while True:
-    #         activations_filepath: str = get_activations_filepath(
-    #             self.model_name, self.language, self.split, self.layer_num, batch_id
-    #         )
-
-    #         # Check if file exists
-    #         if not Path(activations_filepath).exists():
-    #             if batch_id == 0:
-    #                 raise FileNotFoundError(
-    #                     f"No activation file found at {activations_filepath}. "
-    #                     f"Make sure activations have been generated for {self.model_name}, "
-    #                     f"language={self.language}, split={self.split}, layer={self.layer_num}"
-    #                 )
-    #             else:
-    #                 # No more batches found
-    #                 break
-
-    #         data = t.load(activations_filepath)
-
-    #         # print(f"Loaded activations from {activations_filepath}")
-
-    #         activations: Tensor = data["activations"]
-
-    #         new_activations: list[Tensor] = list(activations)
-
-    #         new_labels: Tensor = t.IntTensor(
-    #             self.original_dataset.get_labels_in_range(
-    #                 i, i + len(new_activations), self.probing_task
-    #             )
-    #         )
-    #         # print(new_labels)
-    #         i += len(new_activations)
-
-    #         # Convert tensors to lists of individual tensors and extend
-    #         total_activations_list.extend(new_activations)
-    #         total_labels_list.extend(new_labels)
-
-    #         batch_id += 1
-
-    #     return t.stack(total_activations_list, dim=0), t.stack(total_labels_list, dim=0)
-
     def __getitem__(self, i: int) -> tuple[Tensor, Tensor]:
         return self.activations[i], self.labels[i]
 

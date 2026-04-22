@@ -44,7 +44,7 @@ def run_full_experiment(
 
     # Run a sub-experiment in each layer
     for layer_num in layers:
-        print(f"Probing at layer {layer_num}")
+        # print(f"Probing at layer {layer_num}")
 
         # Train data
         activation_dataset_train: ActivationDataset = ActivationDataset(
@@ -89,8 +89,14 @@ def run_full_experiment(
             "test", "cm", confusion_matrix(test_labels, test_preds)
         )  # type: ignore
 
+        # Add indices per confusion matrix cell for both splits
+        exp_result.add_idxs_per_cm_cell_metric("train", train_labels, train_preds)
+        exp_result.add_idxs_per_cm_cell_metric("test", test_labels, test_preds)
+
         # Use the confusion matrix to get the rest of metrics for this layer
         exp_result.add_metrics_from_confusion_matrix()
+
+    exp_result.add_overlapping_idxs_per_class_metric()
 
     return exp_result
 

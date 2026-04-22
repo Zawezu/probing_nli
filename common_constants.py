@@ -16,6 +16,7 @@ SICK_DIRTY_JP_FILE = "jsick.tsv"
 MERGED_SICK_FILEPATH: LiteralString = f"{SICK_FOLDER}/SICK_merged.json"
 
 LABEL_MAP: dict[str, int] = {"entailment": 0, "neutral": 1, "contradiction": 2}
+REVERSE_LABEL_MAP: dict[int, str] = {v: k for k, v in LABEL_MAP.items()}
 
 # Model constants
 MODELS_FOLDER = "models"

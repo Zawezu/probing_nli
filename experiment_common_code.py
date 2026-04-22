@@ -14,6 +14,7 @@ from common_constants import (
     PLOTS_FOLDER,
     LABEL_MAP,
     LANGUAGE_FULL_NAME_MAP,
+    REVERSE_LABEL_MAP,
 )
 
 mlp_training_parameters: dict[str, float | int] = {
@@ -22,10 +23,6 @@ mlp_training_parameters: dict[str, float | int] = {
     "weight_decay": 0,
     "epochs": 10,
 }
-
-class_names_list: list[str] = [""] * len(LABEL_MAP)
-for label_str, label_idx in LABEL_MAP.items():
-    class_names_list[label_idx] = label_str
 
 
 class ExperimentResult:
@@ -53,6 +50,24 @@ class ExperimentResult:
         except KeyError:
             self.metrics[split][metric] = [value]
 
+    def get_metric(
+        self,
+        split: str,
+        metric: str,
+        layer_num: int | None = None,
+        cls: str | None = None,
+    ) -> Any:
+        if layer_num is None:
+            if cls is None:
+                return self.metrics[split][metric]
+            else:
+                return [m.get(cls, 0) for m in self.metrics[split][metric]]
+        else:
+            if cls is None:
+                return self.metrics[split][metric][layer_num]
+            else:
+                return self.metrics[split][metric][layer_num].get(cls, 0)
+
     def add_metrics_from_confusion_matrix(self) -> None:
         """
         Calculate and add overall and per-class metrics to an ExperimentResult object
@@ -72,7 +87,7 @@ class ExperimentResult:
         """
         for split in ["train", "test"]:
             # Take the confusion matrix at the latest layer that has been recorded
-            cm: ndarray = self.metrics[split]["cm"][-1]
+            cm: ndarray = self.get_metric(split, "cm", -1)  # type: ignore
 
             if cm is None:
                 print(f"Warning: No confusion matrix found for {split} split")
@@ -85,18 +100,19 @@ class ExperimentResult:
 
             # Per-class metrics
             num_classes: int = cm.shape[0]
-            per_class_precision: list[float] = []
-            per_class_recall: list[float] = []
-            per_class_f1: list[float] = []
+            per_class_recall: dict[str, float] = {}
+            per_class_precision: dict[str, float] = {}
+            per_class_f1: dict[str, float] = {}
 
             for class_idx in range(num_classes):
+                class_id = str(class_idx)
                 # Recall (sensitivity/true positive rate): TP / (TP + FN)
                 # TP is diagonal, FN is rest of row
                 row_sum = np.sum(cm[class_idx, :])
                 recall: float = float(
                     cm[class_idx, class_idx] / row_sum if row_sum > 0 else 0.0
                 )
-                per_class_recall.append(recall)
+                per_class_recall[class_id] = recall
 
                 # Precision: TP / (TP + FP)
                 # TP is diagonal, FP is rest of column
@@ -104,14 +120,14 @@ class ExperimentResult:
                 precision: float = float(
                     cm[class_idx, class_idx] / col_sum if col_sum > 0 else 0.0
                 )
-                per_class_precision.append(precision)
+                per_class_precision[class_id] = precision
 
                 # F1 score: 2 * (precision * recall) / (precision + recall)
                 if precision + recall == 0:
                     f1 = 0.0
                 else:
                     f1: float = 2 * (precision * recall) / (precision + recall)
-                per_class_f1.append(float(f1))
+                per_class_f1[class_id] = float(f1)
 
             # Store per-class metrics
             self.append_metric(split, "per_class_precision", per_class_precision)
@@ -119,9 +135,13 @@ class ExperimentResult:
             self.append_metric(split, "per_class_f1", per_class_f1)
 
             # Overall metrics (macro average)
-            self.append_metric(split, "precision", float(np.mean(per_class_precision)))
-            self.append_metric(split, "recall", float(np.mean(per_class_recall)))
-            self.append_metric(split, "f1", float(np.mean(per_class_f1)))
+            self.append_metric(
+                split, "precision", float(np.mean(list(per_class_precision.values())))
+            )
+            self.append_metric(
+                split, "recall", float(np.mean(list(per_class_recall.values())))
+            )
+            self.append_metric(split, "f1", float(np.mean(list(per_class_f1.values()))))
 
     def add_marginal_metrics(self, control_exp_result: "ExperimentResult") -> None:
         assert (
@@ -133,24 +153,17 @@ class ExperimentResult:
 
         # Helper function to get the marginal value for a particular metric
         def get_marginal_value(
-            metric: str, layer_num: int, cls: None | int = None
+            metric: str, layer_num: int, cls: None | str = None
         ) -> float:
-            if cls is None:
-                marginal_value: float = (
-                    self.metrics[split][metric][layer_num]
-                    - control_exp_result.metrics[split][metric][layer_num]
-                )
-            else:
-                marginal_value: float = (
-                    self.metrics[split][metric][layer_num][cls]
-                    - control_exp_result.metrics[split][metric][layer_num][cls]
-                )
+            marginal_value: float = self.get_metric(
+                split, metric, layer_num, cls
+            ) - control_exp_result.get_metric(split, metric, layer_num, cls)  # type: ignore
             return marginal_value
 
         for split in ["train", "test"]:
             for layer_num in range(self.get_num_layers()):
                 # Take the confusion matrix at the latest layer that has been recorded
-                cm: ndarray = self.metrics[split]["cm"][layer_num]
+                cm: ndarray = self.get_metric(split, "cm", layer_num)  # type: ignore
 
                 if cm is None:
                     print(f"Warning: No confusion matrix found for {split} split")
@@ -165,28 +178,29 @@ class ExperimentResult:
 
                 # Per-class metrics
                 num_classes: int = cm.shape[0]
-                marginal_per_class_precision: list[float] = []
-                marginal_per_class_recall: list[float] = []
-                marginal_per_class_f1: list[float] = []
+                marginal_per_class_precision: dict[str, float] = {}
+                marginal_per_class_recall: dict[str, float] = {}
+                marginal_per_class_f1: dict[str, float] = {}
 
                 for class_idx in range(num_classes):
+                    class_id = str(class_idx)
                     # Recall
                     marginal_recall: float = get_marginal_value(
-                        "per_class_recall", layer_num, class_idx
+                        "per_class_recall", layer_num, class_id
                     )
-                    marginal_per_class_recall.append(marginal_recall)
+                    marginal_per_class_recall[class_id] = marginal_recall
 
                     # Precision
                     marginal_precision: float = get_marginal_value(
-                        "per_class_precision", layer_num, class_idx
+                        "per_class_precision", layer_num, class_id
                     )
-                    marginal_per_class_precision.append(marginal_precision)
+                    marginal_per_class_precision[class_id] = marginal_precision
 
                     # F1 score
                     marginal_f1: float = get_marginal_value(
-                        "per_class_f1", layer_num, class_idx
+                        "per_class_f1", layer_num, class_id
                     )
-                    marginal_per_class_f1.append(marginal_f1)
+                    marginal_per_class_f1[class_id] = marginal_f1
 
                 # Store per-class metrics
                 self.append_metric(
@@ -203,13 +217,17 @@ class ExperimentResult:
                 self.append_metric(
                     split,
                     "marginal_precision",
-                    float(np.mean(marginal_per_class_precision)),
+                    float(np.mean(list(marginal_per_class_precision.values()))),
                 )
                 self.append_metric(
-                    split, "marginal_recall", float(np.mean(marginal_per_class_recall))
+                    split,
+                    "marginal_recall",
+                    float(np.mean(list(marginal_per_class_recall.values()))),
                 )
                 self.append_metric(
-                    split, "marginal_f1", float(np.mean(marginal_per_class_f1))
+                    split,
+                    "marginal_f1",
+                    float(np.mean(list(marginal_per_class_f1.values()))),
                 )
 
     def __str__(self) -> str:
@@ -222,6 +240,41 @@ class ExperimentResult:
                 self.model_name,
             ]
         )
+
+    def add_idxs_per_cm_cell_metric(self, split, real_labels, preds) -> None:
+        idxs_per_cm_cell: defaultdict[str, set[int]] = defaultdict(set)
+
+        for idx in range(len(real_labels)):
+            real_label: int = int(real_labels[idx].item())
+            pred_label: int = int(preds[idx].item())
+            key: str = f"real:{real_label},pred:{pred_label}"
+            idxs_per_cm_cell[key].add(idx)
+
+        self.append_metric(split, "idxs_per_cm_cell", dict(idxs_per_cm_cell))
+
+    def add_overlapping_idxs_per_class_metric(self) -> None:
+        for split in ["train", "test"]:
+            idxs_per_cm_cell = self.get_metric(split, "idxs_per_cm_cell")
+
+            overlapping_idxs: dict[str, set[int]] = idxs_per_cm_cell[0].copy()
+
+            # Iterate over all the layers
+            for idxs_per_cm_cell_for_this_layer in idxs_per_cm_cell:
+                overlapping_idx_amounts: dict[str, int] = {}
+                # For each entry in idxs_for_this_cell, we only keep the common indices between the predictions of this layer and the previous one
+                for key, idxs_for_this_cell in idxs_per_cm_cell_for_this_layer.items():
+                    common_idxs = idxs_for_this_cell.intersection(overlapping_idxs[key])
+                    # print(common_idxs)
+                    overlapping_idxs[key] = common_idxs
+                    overlapping_idx_amounts[key] = len(common_idxs)
+
+                # Add the overlapping indices up to this layer
+                self.append_metric(
+                    split, "overlapping_idxs_per_class", overlapping_idxs.copy()
+                )
+                self.append_metric(
+                    split, "overlapping_idx_amounts_per_class", overlapping_idx_amounts
+                )
 
     def save_to_file(self) -> str:
         """
@@ -257,7 +310,7 @@ class ExperimentResult:
 
     def get_num_layers(self) -> int:
         # Get the number of layers. We do it by getting the list of the accuracies over the layers.
-        return len(self.metrics["test"]["accuracy"])
+        return len(self.get_metric("test", "accuracy"))
 
     @staticmethod
     def get_filename(
@@ -307,24 +360,37 @@ def show_plots(
     show: bool = True,
     save: bool = False,
     filename: str = "",
+    legend_position="upper left",
 ) -> None:
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
 
-    extended_class_names_list: list[str] = class_names_list + [
-        "all"
-    ]  # This last element represents any label.
+    # extended_class_names_list: list[str] = class_names_list + [
+    #     "all"
+    # ]  # This last element represents any label.
+    extended_class_names: dict[str, str] = {str(v): k for k, v in LABEL_MAP.items()}
+    extended_class_names[""] = "all"
 
     if "per_class" in metric:
-        class_ids: list[int] = list(LABEL_MAP.values())
+        if metric == "overlapping_idx_amounts_per_class":
+            class_ids: list[str] = []
+            for r in LABEL_MAP.values():
+                for p in LABEL_MAP.values():
+                    class_id: str = f"real:{r},pred:{p}"
+                    class_ids.append(class_id)
+                    extended_class_names[class_id] = (
+                        f"real:{REVERSE_LABEL_MAP[r]},pred:{REVERSE_LABEL_MAP[p]}"
+                    )
+        else:
+            class_ids = [str(label) for label in LABEL_MAP.values()]
     else:
-        class_ids = [-1]
+        class_ids = [""]
 
     # Validate that specified characteristics are valid
     valid_characteristics: list[str] = [
         "model_name",
         "split",
-        "class",
+        "class_name",
         "language",
         "probing_task",
         "extra_iter_num",
@@ -345,11 +411,17 @@ def show_plots(
     for model_name, split, class_id, language, probing_task, extra_iter_num in product(
         model_names, splits, class_ids, languages, probing_tasks, extra_iter_nums
     ):
+        if class_id in extended_class_names.keys():
+            class_name: str = extended_class_names[class_id]
+        else:
+            class_name = class_id
+
         all_combinations.append(
             {
                 "model_name": model_name,
                 "split": split,
-                "class": extended_class_names_list[class_id],
+                "class_id": class_id,
+                "class_name": class_name,
                 "language": language,
                 "probing_task": probing_task,
                 "extra_iter_num": extra_iter_num,
@@ -377,14 +449,26 @@ def show_plots(
         line_request = {
             "exp_result": exp_result,
             "split": combo["split"],
-            "class": combo["class"],
+            "class_id": combo["class_id"],
+            "class_name": combo["class_name"],
         }
+
+        print(f"Created line request:\n{line_request}")
+
         plots_dict[key].append(line_request)
 
     # Convert grouped plots to list format
     plots_to_make: list[list[dict]] = list(plots_dict.values())
 
-    plot_metrics_by_group(plots_to_make, metric, show, save, filename, y_axis_range)
+    plot_metrics_by_group(
+        plots_to_make,
+        metric,
+        show,
+        save,
+        filename,
+        y_axis_range,
+        legend_position=legend_position,
+    )
 
 
 def plot_metrics_by_group(
@@ -394,6 +478,7 @@ def plot_metrics_by_group(
     save: bool,
     filename: str,
     y_axis_range: tuple[float, float] | None,
+    legend_position,
     xlabel: str = "Layer",
     scale: int = 1,
 ) -> None:
@@ -435,14 +520,26 @@ def plot_metrics_by_group(
 
         for group_of_line_requests in plots_to_make:
             for line_request in group_of_line_requests:
-                results_for_determining_axis: list[float | list[float]] = line_request[
-                    "exp_result"
-                ].metrics[line_request["split"]][metric]
-                if isinstance(results_for_determining_axis[0], float):
-                    all_values.extend(results_for_determining_axis)  # type: ignore
+                exp_result: ExperimentResult = line_request["exp_result"]
+                split: str = line_request["split"]
+                class_id: str = line_request["class_id"]
+                class_name: str = line_request["class_name"]
+                # results_for_determining_axis: list[float | list[float]] = exp_result.metrics[split][metric]
+                if class_name != "all":
+                    results_for_determining_axis: list[float] = exp_result.get_metric(
+                        split, metric, layer_num=None, cls=class_id
+                    )
                 else:
-                    for results_list in results_for_determining_axis:
-                        all_values.extend(results_list)  # type: ignore
+                    results_for_determining_axis = exp_result.get_metric(
+                        split, metric, layer_num=None, cls=None
+                    )
+
+                all_values.extend(results_for_determining_axis)
+                # if isinstance(results_for_determining_axis[0], float):
+                #     all_values.extend(results_for_determining_axis)  # type: ignore
+                # else:
+                #     for results_list in results_for_determining_axis:
+                #         all_values.extend(results_list)  # type: ignore
 
         y_axis_range = (
             min(all_values) - y_axis_margin,
@@ -471,15 +568,18 @@ def plot_metrics_by_group(
         attrs_per_line: list[dict[str, str]] = []
 
         for line_request in group_of_line_requests:
+            exp_result: ExperimentResult = line_request["exp_result"]
+            split: str = line_request["split"]
+            class_name: str = line_request["class_name"]
             attrs: dict[str, str] = {
-                "language": LANGUAGE_FULL_NAME_MAP[line_request["exp_result"].language],
-                "probing_task": line_request["exp_result"].probing_task,
-                "probe_type": line_request["exp_result"].probe_type,
-                "model_name": line_request["exp_result"].model_name,
-                "extra_iter_num": line_request["exp_result"].extra_iter_num,
-                "split": line_request["split"],
+                "language": LANGUAGE_FULL_NAME_MAP[exp_result.language],
+                "probing_task": exp_result.probing_task,
+                "probe_type": exp_result.probe_type,
+                "model_name": exp_result.model_name,
+                "extra_iter_num": str(exp_result.extra_iter_num),
+                "split": split,
                 "metric": metric,
-                "label": line_request["class"],
+                "label": class_name,
             }
 
             # Replace all underscores by spaces to create a nicer plot
@@ -523,9 +623,11 @@ def plot_metrics_by_group(
         # Prepare line data with average values for sorting
         lines_to_plot: list[dict] = []
         for i, line_request in enumerate(group_of_line_requests):
-            results: list[float | list[float]] = line_request["exp_result"].metrics[
-                line_request["split"]
-            ][metric]
+            exp_result: ExperimentResult = line_request["exp_result"]
+            split: str = line_request["split"]
+            class_id: str = line_request["class_id"]
+            class_name: str = line_request["class_name"]
+            results: list[float | dict[str, float]] = exp_result.metrics[split][metric]
             layers = range(len(results))
 
             # Generate legend label with only varying attributes
@@ -539,9 +641,8 @@ def plot_metrics_by_group(
             if "per_class" in metric:
                 # If we are dealing with a per-class metric, we add a plot for the requested label id
                 results_for_this_label: list[float] = [
-                    result[LABEL_MAP[line_request["class"]]]
-                    for result in results  # type: ignore
-                ]
+                    r.get(class_id, 0) for r in results
+                ]  # type: ignore
                 average_value: float = float(np.mean(results_for_this_label))
                 lines_to_plot.append(
                     {
@@ -578,7 +679,7 @@ def plot_metrics_by_group(
         ax.set_xlabel(xlabel)
         ax.set_ylabel(metric.replace("_", " "))
         ax.grid(True, alpha=0.3)
-        ax.legend(loc="upper left")
+        ax.legend(loc=legend_position)
         ax.set_ylim(y_axis_range)
 
     # Hide unused subplots
@@ -631,6 +732,10 @@ def plot_confusion_matrix(
     """
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
+
+    class_names_list: list[str] = [""] * len(LABEL_MAP)
+    for label_str, label_idx in LABEL_MAP.items():
+        class_names_list[label_idx] = label_str
 
     # Get confusion matrix for the specified layer
     cm: ndarray = exp_result.metrics[split]["cm"][layer_num]
