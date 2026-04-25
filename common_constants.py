@@ -22,7 +22,8 @@ REVERSE_LABEL_MAP: dict[int, str] = {v: k for k, v in LABEL_MAP.items()}
 MODELS_FOLDER = "models"
 MODEL_NAMES: list[str] = ["olmo_model", "tiny_aya_global"]
 MODEL_IDS: dict[str, str] = {
-    "olmo_model": "allenai/Olmo-3-1025-7B",
+    # "olmo_model": "allenai/Olmo-3-1025-7B", # This model is not instruction-tuned, so I no longer use it
+    "olmo_model": "allenai/Olmo-3-7B-Instruct",  # This is the instruction-tuned version of the same Olmo model
     "tiny_aya_global": "CohereLabs/tiny-aya-global",
 }
 
@@ -51,4 +52,50 @@ PROBES_FOLDER = "./data/probes"
 
 PROBING_TASKS: list[str] = ["standard", "control", "disjunct_control"]
 
+# Hyperparameter constants
+
+HYPERPARAMETERS_FILEPATH = "./data/hyperparameters/hyperparameters.json"
+
 # os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
+
+# Prompt constants
+
+CHAT_TEMPLATES = {
+    "olmo_model": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n"
+        "{% elif message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n"
+        "{% elif message['role'] == 'assistant' %}<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n"
+        "{% endif %}{% endfor %}"
+        "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
+    ),
+    "tiny_aya_global": (
+        "{{ bos_token }}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+        "{% elif message['role'] == 'user' %}<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+        "{% elif message['role'] == 'assistant' %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+        "{% endif %}{% endfor %}"
+        "{% if add_generation_prompt %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{% endif %}"
+    ),
+}
+
+SYSTEM_PROMPTS = {
+    "en": "You are a textual entailment classifier. Always respond with exactly one word: entailment, contradiction, or neutral.",
+    "es": "Eres un clasificador de implicación textual. Responde siempre con una sola palabra: implicación, contradicción o neutral.",
+    "jp": "あなたはテキスト含意分類器です。常に一言で答えてください：含意、矛盾、または中立。",
+}
+FEW_SHOT_EXAMPLES = {
+    "en": (
+        "Premise: A dog is running.\nHypothesis: An animal is moving.\nClassify: entailment, contradiction, or neutral.",
+        "entailment",
+    ),
+    "es": (
+        "Premisa: Un perro está corriendo.\nHipótesis: Un animal se está moviendo.\nClasifica: implicación, contradicción o neutral.",
+        "implicación",
+    ),
+    "jp": (
+        "前提：犬が走っている。\n仮説：動物が動いている。\n一言で分類してください：含意、矛盾、または中立。",
+        "含意",
+    ),
+}

@@ -96,7 +96,8 @@ def run_full_experiment(
         # Use the confusion matrix to get the rest of metrics for this layer
         exp_result.add_metrics_from_confusion_matrix()
 
-    exp_result.add_overlapping_idxs_per_class_metric()
+    exp_result.add_overlapping_idxs_metric(True)
+    exp_result.add_overlapping_idxs_metric(False)
 
     return exp_result
 

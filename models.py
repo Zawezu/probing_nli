@@ -19,6 +19,6 @@ def load_and_save_model(model_name: str) -> None:
 
 
 if __name__ == "__main__":
-    # load_and_save_model("olmo_model")
+    load_and_save_model("olmo_model")
 
-    load_and_save_model("tiny_aya_global")
+    # load_and_save_model("tiny_aya_global")

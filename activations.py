@@ -5,51 +5,20 @@ from torch import Tensor
 from tqdm import tqdm
 from pathlib import Path
 import json
+import sys
+from icecream import ic
 
 from sick import SICKMergedDataset
-from common_constants import ACTIVATIONS_FOLDER, MODELS_FOLDER
+from common_constants import (
+    ACTIVATIONS_FOLDER,
+    MODELS_FOLDER,
+    CHAT_TEMPLATES,
+    SYSTEM_PROMPTS,
+    FEW_SHOT_EXAMPLES,
+    SPLITS,
+)
 
 device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
-
-CHAT_TEMPLATES = {
-    "olmo_model": (
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n"
-        "{% elif message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n"
-        "{% elif message['role'] == 'assistant' %}<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n"
-        "{% endif %}{% endfor %}"
-        "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
-    ),
-    "tiny_aya_global": (
-        "{{ bos_token }}"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
-        "{% elif message['role'] == 'user' %}<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
-        "{% elif message['role'] == 'assistant' %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
-        "{% endif %}{% endfor %}"
-        "{% if add_generation_prompt %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{% endif %}"
-    ),
-}
-
-SYSTEM_PROMPTS = {
-    "en": "You are a textual entailment classifier. Always respond with exactly one word: entailment, contradiction, or neutral.",
-    "es": "Eres un clasificador de implicación textual. Responde siempre con una sola palabra: implicación, contradicción o neutral.",
-    "jp": "あなたはテキスト含意分類器です。常に一言で答えてください：含意、矛盾、または中立。",
-}
-FEW_SHOT_EXAMPLES = {
-    "en": (
-        "Premise: A dog is running.\nHypothesis: An animal is moving.\nClassify: entailment, contradiction, or neutral.",
-        "entailment",
-    ),
-    "es": (
-        "Premisa: Un perro está corriendo.\nHipótesis: Un animal se está moviendo.\nClasifica: implicación, contradicción o neutral.",
-        "implicación",
-    ),
-    "jp": (
-        "前提：犬が走っている。\n仮説：動物が動いている。\n一言で分類してください：含意、矛盾、または中立。",
-        "含意",
-    ),
-}
 
 
 class SpecialCase:
@@ -62,7 +31,7 @@ class SpecialCase:
         return f"SpecialCase(language={self.language}, split={self.split}, start_from_batch={self.start_from_batch})"
 
 
-class ActivationSaver:
+class ActivationRecorder:
     def __init__(self, model_name, tokenizer=None, hf_model=None) -> None:
         self.activations: dict[str, t.Tensor] = {}
         self.model_name: str = model_name
@@ -72,11 +41,17 @@ class ActivationSaver:
 
     def get_activation(self, name):
         def hook(model, input, output) -> None:
-            # 'output' is a tuple for some models; we want the first element (the tensor)
-            if isinstance(output, tuple):
-                self.activations[name] = output[0].detach()
-            else:
-                self.activations[name] = output.detach()
+            # We only record the activations if the dictionary does not have an entry for them
+            # This ensures that the only activations recorded are those for the first forward pass
+            if name not in self.activations.keys():
+                # print("Recording activations")
+                # 'output' is a tuple for some models; we want the first element (the tensor)
+                if isinstance(output, tuple):
+                    self.activations[name] = output[0].detach()
+                else:
+                    self.activations[name] = output.detach()
+            # else:
+            #     print("Activations already recorded")
 
         return hook
 
@@ -146,7 +121,7 @@ class ActivationSaver:
         language: str,
         split: str,
         save_to_disk=True,
-        amount_to_generate=None,
+        amount_of_batches_to_generate=None,
         batch_size: int = 128,
         start_from_batch: int = 0,
     ) -> None:
@@ -155,7 +130,7 @@ class ActivationSaver:
         `start_from_batch` can be used to skip the first N batches so that you can resume
         after a crash.
 
-        `amount_to_generate` limits the number of batches produced *after* the start
+        `amount_of_batches_to_generate` limits the number of batches produced *after* the start
         index.
         """
         if self.tokenizer is None or self.hf_model is None:
@@ -183,6 +158,14 @@ class ActivationSaver:
 
         len_dataloader: int = len(dataloader)
         print(len(dataloader))
+
+        # Olmo needs more tokens to produce Japanese responses (although it still does very poorly with 16)
+        if self.model_name == "olmo_model" and language == "jp":
+            max_new_tokens: int = 16
+        # In all other cases, 4 new tokens is enough to generate a meaningful response most of the time
+        else:
+            max_new_tokens = 4
+
         try:
             for batch_num, (
                 sentence_tuple_batch,
@@ -190,7 +173,7 @@ class ActivationSaver:
                 _,
             ) in tqdm(
                 enumerate(dataloader),
-                desc="Extracting all layers",
+                desc="Extracting all layers per batch",
                 total=len_dataloader,
             ):
                 if batch_num < start_from_batch:  # skip until we reach the resume point
@@ -214,18 +197,12 @@ class ActivationSaver:
                     generated_ids = self.hf_model.generate(
                         input_ids=tokens.input_ids,
                         attention_mask=tokens.attention_mask,
-                        max_new_tokens=5,
+                        max_new_tokens=max_new_tokens,
                         num_beams=1,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
 
-                input_length = tokens.input_ids.shape[1]
-                trimmed_responses = self.tokenizer.batch_decode(
-                    generated_ids[:, input_length:],  # slice off the prompt tokens
-                    skip_special_tokens=True,
-                )
-
-                # Extract activations for all samples in the batch
+                # Extract activations for all samples in the batch from all layers
                 for layer_num in range(n_layers):
                     acts: t.Tensor = self.activations[f"layer_{layer_num}"][
                         :, -1, :
@@ -236,6 +213,18 @@ class ActivationSaver:
                 # Clear GPU memory
                 self.activations.clear()
                 t.cuda.empty_cache()
+
+                input_length = tokens.input_ids.shape[1]
+                trimmed_responses = [
+                    self.tokenizer.decode(
+                        ids[input_length:],
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=True,
+                    )
+                    .encode("utf-8", errors="replace")
+                    .decode("utf-8")
+                    for ids in generated_ids
+                ]
 
                 # print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
                 # print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
@@ -258,8 +247,8 @@ class ActivationSaver:
                 batch_id += 1
 
                 if (
-                    amount_to_generate
-                    and batch_id - start_from_batch >= amount_to_generate
+                    amount_of_batches_to_generate
+                    and batch_id - start_from_batch >= amount_of_batches_to_generate
                 ):
                     break
         finally:
@@ -328,25 +317,80 @@ class ActivationSaver:
 
     @staticmethod
     def generate_messages_batch(
-        sentence_tuple_batch, language: str
+        sentence_tuple_batch, language: str, few_shot: bool = False
     ) -> list[list[dict]]:
         system_prompt = SYSTEM_PROMPTS[language]
-        few_shot_user, few_shot_assistant = FEW_SHOT_EXAMPLES[language]
 
         prompts: list[str] = [
-            ActivationSaver.generate_prompt(sent_a, sent_b, language)
+            ActivationRecorder.generate_prompt(sent_a, sent_b, language)
             for sent_a, sent_b in zip(sentence_tuple_batch[0], sentence_tuple_batch[1])
         ]
 
-        return [
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": few_shot_user},
-                {"role": "assistant", "content": few_shot_assistant},
-                {"role": "user", "content": p},
+        # If few_shot, give an example of a NLI answer. This is off by default, since few-shot
+        # may interfere with the probing results.
+        if few_shot:
+            few_shot_user, few_shot_assistant = FEW_SHOT_EXAMPLES[language]
+            return [
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": few_shot_user},
+                    {"role": "assistant", "content": few_shot_assistant},
+                    {"role": "user", "content": p},
+                ]
+                for p in prompts
             ]
-            for p in prompts
-        ]
+        else:
+            return [
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": p},
+                ]
+                for p in prompts
+            ]
+
+    def generate_all_activations(
+        self,
+        languages_to_generate: list,
+        splits_to_generate: list,
+        amount_of_batches_to_generate: int | None,
+        save_to_disk: bool,
+        batch_size: int,
+        special_cases: list[SpecialCase] = [],
+    ) -> None:
+        for language in languages_to_generate:
+            for split in splits_to_generate:
+                print(
+                    f"{'-'*20}\nGenerating language {language}, split {split}\n{'-'*20}"
+                )
+                start_from_batch: int = 0
+
+                skip_split = False
+                # Handle special cases where we want to start generating from another batch or skip a split.
+                for special_case in special_cases:
+                    if (
+                        special_case.language == language
+                        and special_case.split == split
+                    ):
+                        if special_case.start_from_batch is None:
+                            skip_split = True
+                            print(
+                                f"Handling special case: {special_case}. Skipping split"
+                            )
+                        else:
+                            start_from_batch: int = special_case.start_from_batch
+                            print(
+                                f"Handling special case: {special_case}. Starting from batch {special_case.start_from_batch}"
+                            )
+
+                if not skip_split:
+                    self.generate_activations(
+                        language,
+                        split,
+                        save_to_disk=save_to_disk,
+                        amount_of_batches_to_generate=amount_of_batches_to_generate,
+                        batch_size=batch_size,
+                        start_from_batch=start_from_batch,
+                    )
 
 
 def get_number_of_layers_from_file(model_name):
@@ -444,13 +488,15 @@ def get_responses_filepath(
 
 
 def delete_individual_file(filepath, ignore_substring, actually_delete) -> None:
-    print(filepath.name)
-    if ignore_substring and ignore_substring in filepath.name:
-        print(f"Ignoring {filepath} because {ignore_substring} is in its filename")
-    else:
+    # print(filepath.name)
+    if not (ignore_substring and ignore_substring in filepath.name):
         if actually_delete:
             filepath.unlink()
-        print(f"Deleted {filepath}")
+            print(f"Deleted {filepath}")
+        else:
+            print(f"Would delete {filepath}")
+    # else:
+    #     print(f"Ignoring {filepath} because {ignore_substring} is in its filename")
 
 
 def delete_activations_file(
@@ -460,7 +506,7 @@ def delete_activations_file(
     layer_num: int | str | None = None,
     batch_id: int | None = None,
     ignore_substring: str = "",
-    actually_delete: bool = True,
+    actually_delete: bool = False,
 ) -> None:
     """
     Delete activation pt file(s).
@@ -486,7 +532,7 @@ def delete_activations_file(
         deleted_count = 1
     elif layer_num is not None and batch_id is None:
         # Delete all batches for this layer
-        pattern = f"layer{layer_num}_batch*.pt"
+        pattern = f"layer{layer_num}_*.pt"
         for filepath in directory.glob(pattern):
             delete_individual_file(filepath, ignore_substring, actually_delete)
             deleted_count += 1
@@ -498,7 +544,7 @@ def delete_activations_file(
             deleted_count += 1
     else:
         # Delete all activations for this model/language/split
-        pattern = "layer*_batch*.pt"
+        pattern = "layer*_*.pt"
         for filepath in directory.glob(pattern):
             delete_individual_file(filepath, ignore_substring, actually_delete)
             deleted_count += 1
@@ -596,39 +642,46 @@ def merge_response_batches(model_name: str, language: str, split: str) -> str:
     return merged_filepath
 
 
-def generate_all_activations(
-    activation_loader,
-    languages_to_generate: list,
-    splits_to_generate: list,
-    amount_to_generate: int | None,
-    save_to_disk: bool,
-    batch_size: int,
-    special_cases: list[SpecialCase] = [],
-) -> None:
-    for language in languages_to_generate:
-        for split in splits_to_generate:
-            print(f"{'-'*20}\nGenerating language {language}, split {split}\n{'-'*20}")
-            start_from_batch: int = 0
+if __name__ == "__main__":
+    save_to_disk: bool = True
+    amount_of_batches_to_generate: int | None = None
+    splits_to_generate: list[str] = SPLITS
 
-            skip_split = False
-            # Handle special cases where we want to start generating from another batch or skip a split.
-            for special_case in special_cases:
-                if special_case.language == language and special_case.split == split:
-                    if special_case.start_from_batch is None:
-                        skip_split = True
-                        print(f"Handling special case: {special_case}. Skipping split")
-                    else:
-                        start_from_batch: int = special_case.start_from_batch
-                        print(
-                            f"Handling special case: {special_case}. Starting from batch {special_case.start_from_batch}"
-                        )
+    debug = False
+    if debug:
+        splits_to_generate = ["train"]
+        amount_of_batches_to_generate = 2
+        batch_size = 4
+        print("Running in debug mode")
 
-            if not skip_split:
-                activation_loader.generate_activations(
-                    language,
-                    split,
-                    save_to_disk=save_to_disk,
-                    amount_to_generate=amount_to_generate,
-                    batch_size=batch_size,
-                    start_from_batch=start_from_batch,
-                )
+    ic(save_to_disk, amount_of_batches_to_generate, splits_to_generate)
+
+    assert save_to_disk, "If generating, must also save to disk"
+
+    # ------------------------------
+
+    model_name: str = sys.argv[1]
+    languages_to_generate_arg: str = sys.argv[2]
+    batch_size = int(sys.argv[3])
+
+    print(f"model_name = {model_name}")
+    print(f"batch_size = {batch_size}")
+
+    languages_to_generate: list[str] = languages_to_generate_arg.split(",")
+
+    print(f"languages_to_generate = {languages_to_generate}")
+
+    # ------------------------------
+
+    activation_recorder: ActivationRecorder = ActivationRecorder(model_name)
+
+    special_cases: list[SpecialCase] = []
+
+    activation_recorder.generate_all_activations(
+        languages_to_generate,
+        splits_to_generate,
+        amount_of_batches_to_generate,
+        save_to_disk,
+        batch_size,
+        special_cases=special_cases,
+    )

@@ -5,7 +5,7 @@ from pathlib import Path
 import pickle
 import json
 
-from common_constants import PROBES_FOLDER
+from common_constants import PROBES_FOLDER, HYPERPARAMETERS_FILEPATH
 
 # Ignore convergence warnings
 from sklearn.exceptions import ConvergenceWarning
@@ -92,7 +92,7 @@ class LRProbe:
 
         return LRProbe(lr_model, scaler.mean_, scaler.scale_)
 
-    def refit(self, new_dataset, iterations):
+    def refit(self, new_dataset, iterations) -> None:
         """
         Continue training the existing model on new data.
         """
@@ -216,7 +216,7 @@ def get_probe(
     model_name,
     activation_dataset_train,
     force_probe_creation,
-    hyperparameters_file: str = "hyperparameters.json",
+    hyperparameters_file: str = HYPERPARAMETERS_FILEPATH,
 ):
     if (not force_probe_creation) and (
         probe_exists(language, layer_num, probing_task, probe_type, model_name)
@@ -257,7 +257,7 @@ def load_hyperparameters(
     model_name: str,
     language: str,
     layer_num: int,
-    hyperparameters_file: str = "hyperparameters.json",
+    hyperparameters_file: str,
 ) -> dict:
     """
     Load hyperparameters for a specific model, language, and layer.

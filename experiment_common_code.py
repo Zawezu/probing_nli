@@ -252,28 +252,62 @@ class ExperimentResult:
 
         self.append_metric(split, "idxs_per_cm_cell", dict(idxs_per_cm_cell))
 
-    def add_overlapping_idxs_per_class_metric(self) -> None:
+    def add_overlapping_idxs_metric(self, cummulative) -> None:
         for split in ["train", "test"]:
             idxs_per_cm_cell = self.get_metric(split, "idxs_per_cm_cell")
 
-            overlapping_idxs: dict[str, set[int]] = idxs_per_cm_cell[0].copy()
+            cummulative_idxs: dict[str, set[int]] = idxs_per_cm_cell[0].copy()
+
+            # Append the metrics for the first layer. Since it is the first, it doesn't really make sense to add an overlap metric,
+            # so its values do not really mean anything.
+            self.append_metric(
+                split,
+                f"{'cummulative' if cummulative else 'previous_layer'}_overlapping_idxs",
+                idxs_per_cm_cell[0].copy(),
+            )
+            self.append_metric(
+                split,
+                f"{'cummulative' if cummulative else 'previous_layer'}_overlapping_idx_amounts",
+                {key: 0 for key in idxs_per_cm_cell[0].keys()},
+            )
 
             # Iterate over all the layers
-            for idxs_per_cm_cell_for_this_layer in idxs_per_cm_cell:
+            for i, idxs_per_cm_cell_for_this_layer in enumerate(idxs_per_cm_cell[1:]):
+                if cummulative:
+                    # If cummulative, the indices are the ones that had the same classifications at every single past layer
+                    idxs_prev_layer: dict[str, set[int]] = cummulative_idxs
+                else:
+                    # If not cummulative, the indices are those of just the previous layer classifications
+                    idxs_prev_layer = idxs_per_cm_cell[i - 1].copy()
+
+                overlapping_idxs: dict[str, set[int]] = {}
                 overlapping_idx_amounts: dict[str, int] = {}
                 # For each entry in idxs_for_this_cell, we only keep the common indices between the predictions of this layer and the previous one
                 for key, idxs_for_this_cell in idxs_per_cm_cell_for_this_layer.items():
-                    common_idxs = idxs_for_this_cell.intersection(overlapping_idxs[key])
+                    idxs_for_this_cell_prev_layer: set[int] = (
+                        idxs_prev_layer[key] if key in idxs_prev_layer.keys() else set()
+                    )
+                    # print(f"idxs_for_this_cell:\n{idxs_for_this_cell}")
+                    # print(f"idxs_prev_layer[key]:\n{idxs_for_this_cell_prev_layer}")
+                    common_idxs: set = idxs_for_this_cell.intersection(
+                        idxs_for_this_cell_prev_layer
+                    )
                     # print(common_idxs)
                     overlapping_idxs[key] = common_idxs
                     overlapping_idx_amounts[key] = len(common_idxs)
 
+                    cummulative_idxs[key] = common_idxs
+
                 # Add the overlapping indices up to this layer
                 self.append_metric(
-                    split, "overlapping_idxs_per_class", overlapping_idxs.copy()
+                    split,
+                    f"{'cummulative' if cummulative else 'previous_layer'}_overlapping_idxs",
+                    overlapping_idxs.copy(),
                 )
                 self.append_metric(
-                    split, "overlapping_idx_amounts_per_class", overlapping_idx_amounts
+                    split,
+                    f"{'cummulative' if cummulative else 'previous_layer'}_overlapping_idx_amounts",
+                    overlapping_idx_amounts,
                 )
 
     def save_to_file(self) -> str:
@@ -371,18 +405,17 @@ def show_plots(
     extended_class_names: dict[str, str] = {str(v): k for k, v in LABEL_MAP.items()}
     extended_class_names[""] = "all"
 
-    if "per_class" in metric:
-        if metric == "overlapping_idx_amounts_per_class":
-            class_ids: list[str] = []
-            for r in LABEL_MAP.values():
-                for p in LABEL_MAP.values():
-                    class_id: str = f"real:{r},pred:{p}"
-                    class_ids.append(class_id)
-                    extended_class_names[class_id] = (
-                        f"real:{REVERSE_LABEL_MAP[r]},pred:{REVERSE_LABEL_MAP[p]}"
-                    )
-        else:
-            class_ids = [str(label) for label in LABEL_MAP.values()]
+    if "overlapping_idx_amounts" in metric:
+        class_ids: list[str] = []
+        for r in LABEL_MAP.values():
+            for p in LABEL_MAP.values():
+                class_id: str = f"real:{r},pred:{p}"
+                class_ids.append(class_id)
+                extended_class_names[class_id] = (
+                    f"real:{REVERSE_LABEL_MAP[r]},pred:{REVERSE_LABEL_MAP[p]}"
+                )
+    elif "per_class" in metric:
+        class_ids = [str(label) for label in LABEL_MAP.values()]
     else:
         class_ids = [""]
 
@@ -446,14 +479,16 @@ def show_plots(
         )
 
         # Create plot request
-        line_request = {
+        line_request: dict[str, str | ExperimentResult] = {
             "exp_result": exp_result,
             "split": combo["split"],
             "class_id": combo["class_id"],
             "class_name": combo["class_name"],
         }
 
-        print(f"Created line request:\n{line_request}")
+        print(
+            f"Created line request:\n{[f'{key}: {str(value)}' for key, value in line_request.items()]}"
+        )
 
         plots_dict[key].append(line_request)
 
@@ -526,6 +561,7 @@ def plot_metrics_by_group(
                 class_name: str = line_request["class_name"]
                 # results_for_determining_axis: list[float | list[float]] = exp_result.metrics[split][metric]
                 if class_name != "all":
+                    print(exp_result.metrics[split][metric])
                     results_for_determining_axis: list[float] = exp_result.get_metric(
                         split, metric, layer_num=None, cls=class_id
                     )
@@ -592,7 +628,11 @@ def plot_metrics_by_group(
         varying_attrs: set[str] = set()
 
         for attr_key in attribute_sequence:
-            if not (attr_key == "label" and "per_class" not in metric):
+            if not (
+                attr_key == "label"
+                and "per_class" not in metric
+                and "overlapping_idx_amounts" not in metric
+            ):
                 values: list[str] = [attrs[attr_key] for attrs in attrs_per_line]
                 if len(set(values)) == 1:
                     # This attribute is common across all lines
@@ -628,7 +668,7 @@ def plot_metrics_by_group(
             class_id: str = line_request["class_id"]
             class_name: str = line_request["class_name"]
             results: list[float | dict[str, float]] = exp_result.metrics[split][metric]
-            layers = range(len(results))
+            layers: list[int] = list(range(len(results)))
 
             # Generate legend label with only varying attributes
             legend_parts: list[str] = [
@@ -638,12 +678,18 @@ def plot_metrics_by_group(
             ]
             legend_label: str = " ".join(legend_parts)
 
-            if "per_class" in metric:
+            if "per_class" in metric or "overlapping_idx_amounts" in metric:
                 # If we are dealing with a per-class metric, we add a plot for the requested label id
                 results_for_this_label: list[float] = [
                     r.get(class_id, 0) for r in results
                 ]  # type: ignore
                 average_value: float = float(np.mean(results_for_this_label))
+
+                # If plotting overlapping_idx_amounts, it doesn't make sense to plot the first layer, so it is removed
+                if "overlapping_idx_amounts" in metric:
+                    layers.pop(0)
+                    results_for_this_label.pop(0)
+
                 lines_to_plot.append(
                     {
                         "layers": layers,

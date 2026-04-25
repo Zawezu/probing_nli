@@ -4,7 +4,7 @@ from torch import Tensor
 import torch as t
 from sklearn.metrics import confusion_matrix
 
-from activations import ActivationSaver, ActivationDataset
+from activations import ActivationRecorder, ActivationDataset
 from probes import LRProbe, get_probe
 from experiment_common_code import ExperimentResult
 from itertools import permutations
@@ -77,7 +77,7 @@ def run_full_experiment(
         for refit_num in range(num_refits)
     ]
 
-    olmo_activation_loader: ActivationSaver = ActivationSaver("olmo_model")
+    olmo_activation_loader: ActivationRecorder = ActivationRecorder("olmo_model")
 
     # If num_layers is specified, run experiment on those layers. Otherwise get the number of layers automatically
     if num_layers:
@@ -117,9 +117,9 @@ def run_full_experiment(
         test_labels: Tensor = activation_dataset_test_b.labels
 
         for refit_num in range(num_refits):
-            print(
-                f"Testing probe refitted for {refit_num * iterations_per_refit} iterations"
-            )
+            # print(
+            #     f"Testing probe refitted for {refit_num * iterations_per_refit} iterations"
+            # )
 
             # Get the correct experiment result
             exp_result = exp_results[refit_num]
@@ -150,82 +150,12 @@ def run_full_experiment(
             # Use the confusion matrix to get the rest of metrics for this layer
             exp_result.add_metrics_from_confusion_matrix()
 
+    # After all the the experiments are done for all layers, add the overlapping indices metrics
+    for exp_result in exp_results:
+        exp_result.add_overlapping_idxs_metric(True)
+        exp_result.add_overlapping_idxs_metric(False)
+
     return exp_results
-
-    # # Get probes at each layer
-    # probes: list[LRProbe] = []
-    # for layer_num in layers:
-    #     # Get a probe trained on language a
-    #     # Train data (language a)
-    #     activation_dataset_train_a: ActivationDataset = ActivationDataset(
-    #         language_a, "train", layer_num, probing_task, model_name
-    #     )
-
-    #     probe: LRProbe = get_probe(
-    #         language_a,
-    #         layer_num,
-    #         probing_task,
-    #         probe_type,
-    #         model_name,
-    #         activation_dataset_train_a,
-    #         force_probe_creation,
-    #         device,
-    #     )
-    #     probes.append(probe)
-
-    # for refit_num in range(num_refits):
-    #     print(f"Testing probe refitted for {refit_num * iterations_per_refit} iterations")
-    #     exp_result = exp_results[refit_num]
-    #     for layer_num in layers:
-    #         # Train data (language a)
-    #         activation_dataset_train_a: ActivationDataset = ActivationDataset(
-    #             language_a, "train", layer_num, probing_task, model_name
-    #         )
-
-    #         # Train data (language b)
-    #         activation_dataset_train_b: ActivationDataset = ActivationDataset(
-    #             language_b, "train", layer_num, probing_task, model_name
-    #         )
-
-    #         # Test data (language b)
-    #         activation_dataset_test_b: ActivationDataset = ActivationDataset(
-    #             language_b, "test", layer_num, probing_task, model_name
-    #         )
-
-    #         # We get the appropiate probe for this layer
-    #         probe = probes[layer_num]
-
-    #         if refit_num != 0: # We skip refitting the first time
-    #             # We refit the probe on the training set of the new language for a limited number of iterations
-    #             probe.refit(activation_dataset_train_b, iterations_per_refit)
-
-    #         # Load labels for this layer (not necessary in theory, but done just in case the layer activations somehow got misaligned)
-    #         train_labels: Tensor = activation_dataset_train_a.labels
-    #         test_labels: Tensor = activation_dataset_test_b.labels
-
-    #         # Get train predictions (language b) for generating the metrics
-    #         train_preds: Tensor = probe.pred(activation_dataset_train_b.activations)  # type: ignore
-
-    #         # Save confusion matrix of train predictions
-    #         exp_result.append_metric(
-    #             "train", "cm", confusion_matrix(train_labels, train_preds)
-    #         )  # type: ignore
-
-    #         # Get test predictions (language b) for generating the metrics
-    #         test_preds: Tensor = probe.pred(activation_dataset_test_b.activations)  # type: ignore
-
-    #         # print(f"First few test labels: {activation_dataset_test_b.labels[:20]}")
-    #         # print(f"First few test preds:  {test_preds}")
-
-    #         # Save confusion matrix of test predictions
-    #         exp_result.append_metric(
-    #             "test", "cm", confusion_matrix(test_labels, test_preds)
-    #         )  # type: ignore
-
-    #         # Use the confusion matrix to get the rest of metrics for this layer
-    #         exp_result.add_metrics_from_confusion_matrix()
-
-    # return exp_results
 
 
 def run_experiment_2(

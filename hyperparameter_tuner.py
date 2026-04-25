@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from activations import get_number_of_layers_from_file, ActivationDataset
-from common_constants import MODEL_NAMES, LANGUAGES
+from common_constants import MODEL_NAMES, LANGUAGES, HYPERPARAMETERS_FILEPATH
 from probes import LRProbe
 
 
@@ -109,7 +109,7 @@ def optimise_hyperparameters_all_layers(
 
 def save_hyperparameters(
     all_hyperparameters: dict,
-    output_file: str = "hyperparameters.json",
+    output_file: str = HYPERPARAMETERS_FILEPATH,
 ) -> str:
     """
     Save aggregated hyperparameters to a JSON file.
