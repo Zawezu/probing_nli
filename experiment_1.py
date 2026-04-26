@@ -8,6 +8,7 @@ from sklearn.metrics import confusion_matrix
 from activations import ActivationDataset, get_number_of_layers_from_file
 from probes import get_probe
 from experiment_common_code import ExperimentResult
+from utils import LABEL_MAP
 
 experiment_number = 1
 
@@ -74,8 +75,13 @@ def run_full_experiment(
         train_preds: Tensor = probe.pred(activation_dataset_train.activations)  # type: ignore
 
         # Save confusion matrix of train predictions
+        # Specify labels [0, 1, 2] from LABEL_MAP for consistent 3x3 matrix
         exp_result.append_metric(
-            "train", "cm", confusion_matrix(train_labels, train_preds)
+            "train",
+            "cm",
+            confusion_matrix(
+                train_labels, train_preds, labels=list(LABEL_MAP.values())
+            ),
         )  # type: ignore
 
         # Get test predictions for generating the metrics
@@ -86,7 +92,9 @@ def run_full_experiment(
 
         # Save confusion matrix of test predictions
         exp_result.append_metric(
-            "test", "cm", confusion_matrix(test_labels, test_preds)
+            "test",
+            "cm",
+            confusion_matrix(test_labels, test_preds, labels=list(LABEL_MAP.values())),
         )  # type: ignore
 
         # Add indices per confusion matrix cell for both splits

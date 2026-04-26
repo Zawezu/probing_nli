@@ -1,4 +1,4 @@
-from common_constants import MODELS_FOLDER
+from utils import MODELS_FOLDER
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch as t

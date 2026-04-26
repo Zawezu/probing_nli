@@ -8,6 +8,7 @@ from activations import ActivationRecorder, ActivationDataset
 from probes import LRProbe, get_probe
 from experiment_common_code import ExperimentResult
 from itertools import permutations
+from utils import LABEL_MAP
 
 experiment_number = 2
 
@@ -132,8 +133,13 @@ def run_full_experiment(
             train_preds: Tensor = probe.pred(activation_dataset_train_b.activations)  # type: ignore
 
             # Save confusion matrix of train predictions
+            # Specify labels [0, 1, 2] from LABEL_MAP for consistent 3x3 matrix
             exp_result.append_metric(
-                "train", "cm", confusion_matrix(train_labels, train_preds)
+                "train",
+                "cm",
+                confusion_matrix(
+                    train_labels, train_preds, labels=list(LABEL_MAP.values())
+                ),
             )  # type: ignore
 
             # Get test predictions (language b) for generating the metrics
@@ -144,7 +150,11 @@ def run_full_experiment(
 
             # Save confusion matrix of test predictions
             exp_result.append_metric(
-                "test", "cm", confusion_matrix(test_labels, test_preds)
+                "test",
+                "cm",
+                confusion_matrix(
+                    test_labels, test_preds, labels=list(LABEL_MAP.values())
+                ),
             )  # type: ignore
 
             # Use the confusion matrix to get the rest of metrics for this layer

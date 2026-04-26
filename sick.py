@@ -3,7 +3,7 @@ import json
 import random
 import csv
 
-from common_constants import (
+from utils import (
     SICK_FOLDER,
     SICK_DIRTY_FOLDERS,
     SICK_DIRTY_EN_FILE,
@@ -155,7 +155,12 @@ class SICKMergedDataset(Dataset):
                 )
                 self.original_ids.append(int(id))
 
-    def get_labels_in_range(self, start: int, end: int, probing_task: str) -> list[int]:
+    def get_labels(
+        self, start: int = 0, end: int | None = None, probing_task: str = "standard"
+    ) -> list[int]:
+        if end is None:
+            end = len(self.labels)
+
         labels_selected: list[dict[str, int]] = self.labels[start:end]
         return [x[probing_task] for x in labels_selected]
 

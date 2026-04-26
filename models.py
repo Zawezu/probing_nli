@@ -1,5 +1,5 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from common_constants import MODELS_FOLDER, MODEL_IDS
+from utils import MODELS_FOLDER, MODEL_IDS
 from pathlib import Path
 
 

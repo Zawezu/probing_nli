@@ -9,13 +9,15 @@ import sys
 from icecream import ic
 
 from sick import SICKMergedDataset
-from common_constants import (
+from utils import (
     ACTIVATIONS_FOLDER,
     MODELS_FOLDER,
     CHAT_TEMPLATES,
     SYSTEM_PROMPTS,
     FEW_SHOT_EXAMPLES,
     SPLITS,
+    get_n_layers_txt_filepath,
+    get_number_of_layers_from_file,
 )
 
 device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
@@ -93,10 +95,15 @@ class ActivationRecorder:
         self,
         messages_batch: list[list[dict]],
         responses: list[str],
+        original_ids: list[int],
         language: str,
         split: str,
         batch_id: int,
     ) -> None:
+        assert (
+            len(messages_batch) == len(responses) == len(original_ids)
+        ), "Cannot save batch responses. The lengths of the lists do not match."
+
         responses_filepath = get_responses_filepath(
             self.model_name, language, split, batch_id
         )
@@ -105,8 +112,10 @@ class ActivationRecorder:
         path_obj.parent.mkdir(parents=True, exist_ok=True)
 
         records = [
-            {"message": messages, "response": response}
-            for messages, response in zip(messages_batch, responses)
+            {"message": messages, "response": response, "original_id": original_id}
+            for messages, response, original_id in zip(
+                messages_batch, responses, original_ids
+            )
         ]
 
         with open(responses_filepath, "w", encoding="utf-8") as f:
@@ -170,7 +179,7 @@ class ActivationRecorder:
             for batch_num, (
                 sentence_tuple_batch,
                 _,
-                _,
+                original_ids,
             ) in tqdm(
                 enumerate(dataloader),
                 desc="Extracting all layers per batch",
@@ -240,6 +249,7 @@ class ActivationRecorder:
                     self._save_batch_responses(
                         messages_batch,
                         trimmed_responses,
+                        original_ids,
                         language,
                         split,
                         batch_id,
@@ -292,26 +302,11 @@ class ActivationRecorder:
     def generate_prompt(sent_a, sent_b, language) -> str:
         match language:
             case "en":
-                # return (
-                #     f"Premise: {sent_a}\nHypothesis: {sent_b}\n"
-                #     f"Classify the relationship between the premise and hypothesis. "
-                #     f"Reply with a single word: entailment, contradiction, or neutral."
-                # )
-                return (
-                    f"Premise: {sent_a}\nHypothesis: {sent_b}\n"
-                    f"Classify: entailment, contradiction, or neutral."  # shorter, no prose instruction
-                )
+                return f"Premise: {sent_a}\nHypothesis: {sent_b}\nClassification: "
             case "es":
-                return (
-                    f"Premisa: {sent_a}\nHipótesis: {sent_b}\n"
-                    f"Clasifica la relación. Responde con una sola palabra: "
-                    f"implicación, contradicción o neutral."
-                )
+                return f"Premisa: {sent_a}\nHipótesis: {sent_b}\nClasificación: "
             case "jp":
-                return (
-                    f"前提：{sent_a}\n仮説：{sent_b}\n"
-                    f"関係を一言で分類してください：含意、矛盾、または中立。"
-                )
+                return f"前提：{sent_a}\n仮説：{sent_b}\n分類："
             case _:
                 raise KeyError(f"Language {language} is not supported")
 
@@ -393,15 +388,6 @@ class ActivationRecorder:
                     )
 
 
-def get_number_of_layers_from_file(model_name):
-    with open(get_n_layers_txt_filepath(model_name), "r") as file:
-        return int(file.readline())
-
-
-def get_n_layers_txt_filepath(model_name) -> str:
-    return f"{ACTIVATIONS_FOLDER}/{model_name}/n_layers.txt"
-
-
 class ActivationDataset(Dataset):
     def __init__(
         self,
@@ -450,7 +436,7 @@ class ActivationDataset(Dataset):
         # Get labels for all samples
         num_samples = len(activations)
         labels: Tensor = t.IntTensor(
-            original_dataset.get_labels_in_range(0, num_samples, self.probing_task)
+            original_dataset.get_labels(0, num_samples, self.probing_task)
         )
 
         return activations, labels

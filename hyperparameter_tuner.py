@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from activations import get_number_of_layers_from_file, ActivationDataset
-from common_constants import MODEL_NAMES, LANGUAGES, HYPERPARAMETERS_FILEPATH
+from utils import MODEL_NAMES, LANGUAGES, HYPERPARAMETERS_FILEPATH
 from probes import LRProbe
 
 

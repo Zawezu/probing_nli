@@ -1,11 +1,13 @@
 import torch as t
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics.pairwise import cosine_similarity
 from pathlib import Path
 import pickle
 import json
+import numpy as np
 
-from common_constants import PROBES_FOLDER, HYPERPARAMETERS_FILEPATH
+from utils import PROBES_FOLDER, HYPERPARAMETERS_FILEPATH
 
 # Ignore convergence warnings
 from sklearn.exceptions import ConvergenceWarning
@@ -108,6 +110,17 @@ class LRProbe:
 
         self.lr_model.fit(X_scaled, y)
 
+    def get_vector(self) -> np.ndarray:
+        """Flatten coefficients (and optionally intercept) into a single vector."""
+        coef = self.lr_model.coef_.flatten()
+        intercept = self.lr_model.intercept_.flatten()
+        return np.concatenate([coef, intercept])
+
+    def calculate_cosine_similarity(self, second_lr_probe: "LRProbe") -> float:
+        vector_1: np.ndarray = self.get_vector().reshape(1, -1)
+        vector_2: np.ndarray = second_lr_probe.get_vector().reshape(1, -1)
+        return cosine_similarity(vector_1, vector_2)[0, 0]
+
 
 def get_probe_filename(
     probe_type: str, language: str, layer_num: int, probing_task: str
@@ -209,15 +222,15 @@ def probe_exists(
 
 
 def get_probe(
-    language,
-    layer_num,
-    probing_task,
-    probe_type,
-    model_name,
-    activation_dataset_train,
-    force_probe_creation,
+    language: str,
+    layer_num: int,
+    probing_task: str,
+    probe_type: str,
+    model_name: str,
+    activation_dataset_train=None,
+    force_probe_creation: bool = False,
     hyperparameters_file: str = HYPERPARAMETERS_FILEPATH,
-):
+) -> LRProbe:
     if (not force_probe_creation) and (
         probe_exists(language, layer_num, probing_task, probe_type, model_name)
     ):
@@ -234,12 +247,17 @@ def get_probe(
         print("Creating probe")
         match probe_type:
             case "lr":
-                hyperparams = load_hyperparameters(
+                if activation_dataset_train is None:
+                    raise ValueError(
+                        "activation_dataset_train must be specified in order to create a probe"
+                    )
+
+                hyperparams: dict = load_hyperparameters(
                     model_name, language, layer_num, hyperparameters_file
                 )
-                C = hyperparams.get("C", 0.1)
+                C: float = hyperparams.get("C", 0.1)
                 fit_intercept = hyperparams.get("fit_intercept", False)
-                probe = LRProbe.create_from_data(
+                probe: LRProbe = LRProbe.create_from_data(
                     activation_dataset_train, C, fit_intercept
                 )
             # MLP not currently implemented

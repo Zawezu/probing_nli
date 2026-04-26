@@ -8,8 +8,9 @@ from matplotlib.pylab import ndarray
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from torch import Tensor
 
-from common_constants import (
+from utils import (
     EXPERIMENT_RESULTS_FOLDER,
     PLOTS_FOLDER,
     LABEL_MAP,
@@ -45,6 +46,7 @@ class ExperimentResult:
         self.metrics: dict[str, dict[str, Any]] = {"train": {}, "test": {}}
 
     def append_metric(self, split: str, metric: str, value: Any) -> None:
+        # print(f"Appending {value}")
         try:
             self.metrics[split][metric].append(value)
         except KeyError:
@@ -78,9 +80,13 @@ class ExperimentResult:
         - precision: Overall precision (macro average, float)
         - recall: Overall recall (macro average, float)
         - f1: Overall F1 score (macro average, float)
-        - per_class_precision: List of per-class precision scores (list[float])
-        - per_class_recall: List of per-class recall scores (list[float])
-        - per_class_f1: List of per-class F1 scores (list[float])
+        - per_class_precision: List of per-class precision scores with label keys
+        - per_class_recall: List of per-class recall scores with label keys
+        - per_class_f1: List of per-class F1 scores with label keys
+
+        Label keys depend on confusion matrix shape:
+        - 3x3 matrix: keys are ["0", "1", "2"] (LABEL_MAP values)
+        - 4x4 matrix: keys are ["-1", "0", "1", "2"] (including unknown label)
 
         Args:
             result: ExperimentResult object with confusion matrices stored in metrics["train"]["cm"] and metrics["test"]["cm"]
@@ -93,19 +99,34 @@ class ExperimentResult:
                 print(f"Warning: No confusion matrix found for {split} split")
                 continue
 
+            # Determine label values based on confusion matrix shape
+            num_classes: int = cm.shape[0]
+            if num_classes == 4:
+                # 4x4 matrix: [-1, 0, 1, 2] for experiment 3
+                label_values: list[int] = [-1, 0, 1, 2]
+            elif num_classes == 3:
+                # 3x3 matrix: [0, 1, 2] for experiments 1 and 2
+                label_values: list[int] = [0, 1, 2]
+            else:
+                raise ValueError(
+                    f"Unexpected confusion matrix shape: {cm.shape}. Expected 3x3 or 4x4."
+                )
+
             # Accuracy: sum of diagonal / sum of all elements
             total_sum = np.sum(cm)
             accuracy = float(np.trace(cm) / total_sum if total_sum > 0 else 0.0)
             self.append_metric(split, "accuracy", accuracy)
 
             # Per-class metrics
-            num_classes: int = cm.shape[0]
             per_class_recall: dict[str, float] = {}
             per_class_precision: dict[str, float] = {}
             per_class_f1: dict[str, float] = {}
 
             for class_idx in range(num_classes):
-                class_id = str(class_idx)
+                # Use the actual label value as the key
+                label_value = label_values[class_idx]
+                class_id = str(label_value)
+
                 # Recall (sensitivity/true positive rate): TP / (TP + FN)
                 # TP is diagonal, FN is rest of row
                 row_sum = np.sum(cm[class_idx, :])
@@ -245,8 +266,15 @@ class ExperimentResult:
         idxs_per_cm_cell: defaultdict[str, set[int]] = defaultdict(set)
 
         for idx in range(len(real_labels)):
-            real_label: int = int(real_labels[idx].item())
-            pred_label: int = int(preds[idx].item())
+            real_label: int = (
+                int(real_labels[idx].item())
+                if isinstance(real_labels, Tensor)
+                else real_labels[idx]
+            )
+            pred_label: int = (
+                int(preds[idx].item()) if isinstance(preds, Tensor) else preds[idx]
+            )
+
             key: str = f"real:{real_label},pred:{pred_label}"
             idxs_per_cm_cell[key].add(idx)
 
@@ -355,7 +383,10 @@ class ExperimentResult:
         extra_iter_num: int,
     ) -> str:
         """Generate filename based on experiment parameters."""
-        return f"{language},{probing_task},{probe_type},{model_name},{extra_iter_num}_extra_iters.pkl"
+        if extra_iter_num:
+            return f"{language},{probing_task},{probe_type},{model_name},{extra_iter_num}_extra_iters.pkl"
+        else:
+            return f"{language},{probing_task},{probe_type},{model_name}.pkl"
 
     @staticmethod
     def get_from_file(
@@ -755,11 +786,12 @@ def plot_metrics_by_group(
 def plot_confusion_matrix(
     exp_result: ExperimentResult,
     split: str,
-    layer_num: int,
+    layer_num: int = 0,
     show: bool = True,
     save: bool = False,
     filename: str = "",
     figsize: tuple[int, int] = (8, 6),
+    include_unknown=False,
 ) -> None:
     """
     Plot a confusion matrix as a heatmap using seaborn.
@@ -779,12 +811,23 @@ def plot_confusion_matrix(
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
 
+    assert not (
+        include_unknown and exp_result.experiment_number != 3
+    ), f"include_unknown={include_unknown} only makes sense if experiment_number is 3"
+
     class_names_list: list[str] = [""] * len(LABEL_MAP)
     for label_str, label_idx in LABEL_MAP.items():
         class_names_list[label_idx] = label_str
 
     # Get confusion matrix for the specified layer
     cm: ndarray = exp_result.metrics[split]["cm"][layer_num]
+
+    if exp_result.experiment_number == 3:
+        if include_unknown:
+            class_names_list.insert(0, "unknown")
+        else:
+            # If include_unknown is False, cut off the first column and row (unknown)
+            cm = cm[1:, 1:]
 
     # Create figure and plot
     fig, ax = plt.subplots(figsize=figsize)
