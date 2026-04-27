@@ -1,3 +1,4 @@
+from itertools import permutations
 from typing import LiteralString
 # import os
 
@@ -108,3 +109,29 @@ def get_number_of_layers_from_file(model_name) -> int:
 
 def get_n_layers_txt_filepath(model_name) -> str:
     return f"{ACTIVATIONS_FOLDER}/{model_name}/n_layers.txt"
+
+
+def get_language_merged_string(language_pair: tuple[str, str]) -> str:
+    """
+    Merges the two languages into a single language string. This is because ExperimentResult expects a single language.
+    If multiple pairs are passed, returns a list with each of their merged strings
+    """
+    return f"{language_pair[0]}→{language_pair[1]}"
+
+
+def get_all_language_merged_strings(language_pairs: list[tuple[str, str]]) -> list[str]:
+    """
+    Merges the two languages into a single language string. This is because ExperimentResult expects a single language.
+    If multiple pairs are passed, returns a list with each of their merged strings
+    """
+    merged_string_list: list[str] = []
+    for pair in language_pairs:
+        merged_string_list.append(get_language_merged_string(pair))
+    return merged_string_list
+
+
+def get_language_pairs(languages: list[str]) -> list[tuple[str, str]]:
+    """
+    Gets a list of all possible language pairs given a list of languages
+    """
+    return list(permutations(languages, 2))

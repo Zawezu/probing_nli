@@ -4,43 +4,14 @@ from torch import Tensor
 import torch as t
 from sklearn.metrics import confusion_matrix
 
-from activations import ActivationRecorder, ActivationDataset
-from probes import LRProbe, get_probe
+from activations import ActivationDataset
+from probes import LRProbe, get_probe, save_probe
 from experiment_common_code import ExperimentResult
-from itertools import permutations
-from utils import LABEL_MAP
+from utils import LABEL_MAP, get_language_merged_string, get_number_of_layers_from_file
 
 experiment_number = 2
 
 device: Literal["cuda", "cpu"] = "cuda" if t.cuda.is_available() else "cpu"
-
-
-def get_language_merged_string(language_pair: tuple[str, str]) -> str:
-    """
-    Merges the two languages into a single language string. This is because ExperimentResult expects a single language.
-    If multiple pairs are passed, returns a list with each of their merged strings
-    """
-    return f"{language_pair[0]}→{language_pair[1]}"
-
-
-def get_multiple_language_merged_strings(
-    language_pairs: list[tuple[str, str]],
-) -> list[str]:
-    """
-    Merges the two languages into a single language string. This is because ExperimentResult expects a single language.
-    If multiple pairs are passed, returns a list with each of their merged strings
-    """
-    merged_string_list: list[str] = []
-    for pair in language_pairs:
-        merged_string_list.append(get_language_merged_string(pair))
-    return merged_string_list
-
-
-def get_language_pairs(languages: list[str]) -> list[tuple[str, str]]:
-    """
-    Gets a list of all possible language pairs given a list of languages
-    """
-    return list(permutations(languages, 2))
 
 
 def run_full_experiment(
@@ -52,6 +23,7 @@ def run_full_experiment(
     num_refits: int,
     num_layers: int | None,
     iterations_per_refit: int,
+    save_refitted_probes: bool = True,
 ) -> list[ExperimentResult]:
     """
     Performs a full run of experiment 2
@@ -78,13 +50,7 @@ def run_full_experiment(
         for refit_num in range(num_refits)
     ]
 
-    olmo_activation_loader: ActivationRecorder = ActivationRecorder("olmo_model")
-
-    # If num_layers is specified, run experiment on those layers. Otherwise get the number of layers automatically
-    if num_layers:
-        layers: list[int] = list(range(num_layers))
-    else:
-        layers: list[int] = list(range(olmo_activation_loader.get_number_of_layers()))
+    layers: list[int] = list(range(get_number_of_layers_from_file(model_name)))
 
     for layer_num in layers:
         activation_dataset_train_a: ActivationDataset = ActivationDataset(
@@ -129,6 +95,17 @@ def run_full_experiment(
                 # We refit the probe on the training set of the new language for a limited number of iterations
                 probe.refit(activation_dataset_train_b, iterations_per_refit)
 
+                if save_refitted_probes:
+                    save_probe(
+                        probe,
+                        get_language_merged_string(language_pair),
+                        layer_num,
+                        probing_task,
+                        probe_type,
+                        model_name,
+                        refit_num * iterations_per_refit,
+                    )
+
             # Get train predictions (language b) for generating the metrics
             train_preds: Tensor = probe.pred(activation_dataset_train_b.activations)  # type: ignore
 
@@ -156,6 +133,10 @@ def run_full_experiment(
                     test_labels, test_preds, labels=list(LABEL_MAP.values())
                 ),
             )  # type: ignore
+
+            # Add indices per confusion matrix cell for both splits
+            exp_result.add_idxs_per_cm_cell_metric("train", train_labels, train_preds)
+            exp_result.add_idxs_per_cm_cell_metric("test", test_labels, test_preds)
 
             # Use the confusion matrix to get the rest of metrics for this layer
             exp_result.add_metrics_from_confusion_matrix()

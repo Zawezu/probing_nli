@@ -123,9 +123,13 @@ class LRProbe:
 
 
 def get_probe_filename(
-    probe_type: str, language: str, layer_num: int, probing_task: str
+    probe_type: str,
+    language: str,
+    layer_num: int,
+    probing_task: str,
+    extra_iters: int = 0,
 ) -> str:
-    return f"{probe_type}_{language}_layer{layer_num}_{probing_task}.pkl"
+    return f"{probe_type}_{language}_layer{layer_num}_{probing_task}{f'_{extra_iters}_extra_iters' if extra_iters else ''}.pkl"
 
 
 def save_probe(
@@ -135,6 +139,7 @@ def save_probe(
     probing_task: str,
     probe_type: str,
     model_name: str,
+    extra_iters: int = 0,
 ) -> str:
     """
     Save an sklearn-based probe model to a file.
@@ -153,7 +158,9 @@ def save_probe(
     save_dir: Path = Path(PROBES_FOLDER) / model_name
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    filename: str = get_probe_filename(probe_type, language, layer_num, probing_task)
+    filename: str = get_probe_filename(
+        probe_type, language, layer_num, probing_task, extra_iters
+    )
     filepath: Path = save_dir / filename
 
     with open(filepath, "wb") as f:
@@ -170,6 +177,7 @@ def load_probe(
     probing_task: str,
     probe_type: str,
     model_name: str,
+    extra_iters: int = 0,
 ) -> LRProbe:
     """
     Load an sklearn-based probe model from a file.
@@ -184,7 +192,9 @@ def load_probe(
     Returns:
         The loaded LRProbe instance
     """
-    filename: str = get_probe_filename(probe_type, language, layer_num, probing_task)
+    filename: str = get_probe_filename(
+        probe_type, language, layer_num, probing_task, extra_iters
+    )
     filepath: Path = Path(PROBES_FOLDER) / model_name / filename
 
     with open(filepath, "rb") as f:
@@ -201,6 +211,7 @@ def probe_exists(
     probing_task: str,
     probe_type: str,
     model_name: str,
+    extra_iters: int = 0,
 ) -> bool:
     """
     Check if a probe file exists.
@@ -215,7 +226,9 @@ def probe_exists(
     Returns:
         True if the probe file exists, False otherwise
     """
-    filename: str = get_probe_filename(probe_type, language, layer_num, probing_task)
+    filename: str = get_probe_filename(
+        probe_type, language, layer_num, probing_task, extra_iters
+    )
     filepath: Path = Path(PROBES_FOLDER) / model_name / filename
 
     return filepath.exists()
