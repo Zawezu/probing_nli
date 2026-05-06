@@ -43,7 +43,15 @@ class ExperimentResult:
         self.model_name: str = model_name
         self.extra_iter_num: int = extra_iter_num
 
-        self.metrics: dict[str, dict[str, Any]] = {"train": {}, "test": {}}
+        match experiment_number:
+            case 1 | 3:
+                self.splits: list[str] = ["train", "test"]
+            case 2:
+                self.splits = ["train_a", "test_a", "train_b", "test_b"]
+            case _:
+                raise ValueError(f"Incorrect experiment_number: {experiment_number}")
+
+        self.metrics: dict[str, dict[str, Any]] = {split: {} for split in self.splits}
 
     def append_metric(self, split: str, metric: str, value: Any) -> None:
         # print(f"Appending {value}")
@@ -70,7 +78,7 @@ class ExperimentResult:
             else:
                 return self.metrics[split][metric][layer_num].get(cls, 0)
 
-    def add_metrics_from_confusion_matrix(self) -> None:
+    def add_metrics_from_confusion_matrix(self, include_unknown=False) -> None:
         """
         Calculate and add overall and per-class metrics to an ExperimentResult object
         based on confusion matrices already stored in the result.
@@ -91,13 +99,20 @@ class ExperimentResult:
         Args:
             result: ExperimentResult object with confusion matrices stored in metrics["train"]["cm"] and metrics["test"]["cm"]
         """
-        for split in ["train", "test"]:
+        for split in self.splits:
             # Take the confusion matrix at the latest layer that has been recorded
             cm: ndarray = self.get_metric(split, "cm", -1)  # type: ignore
 
-            if cm is None:
-                print(f"Warning: No confusion matrix found for {split} split")
-                continue
+            if include_unknown:
+                assert (
+                    cm.shape[0] == 4
+                ), f"include_unknown set to {include_unknown} even though there was no unknown in the confusion matrix"
+                metric_suffix = "_including_unk"
+            else:
+                # Cut off the first row and column (unknown values), but only if the unknown row and column exist
+                if cm.shape[0] == 4:
+                    cm = cm[1:, 1:]
+                metric_suffix: str = ""
 
             # Determine label values based on confusion matrix shape
             num_classes: int = cm.shape[0]
@@ -115,7 +130,7 @@ class ExperimentResult:
             # Accuracy: sum of diagonal / sum of all elements
             total_sum = np.sum(cm)
             accuracy = float(np.trace(cm) / total_sum if total_sum > 0 else 0.0)
-            self.append_metric(split, "accuracy", accuracy)
+            self.append_metric(split, f"accuracy{metric_suffix}", accuracy)
 
             # Per-class metrics
             per_class_recall: dict[str, float] = {}
@@ -151,18 +166,28 @@ class ExperimentResult:
                 per_class_f1[class_id] = float(f1)
 
             # Store per-class metrics
-            self.append_metric(split, "per_class_precision", per_class_precision)
-            self.append_metric(split, "per_class_recall", per_class_recall)
-            self.append_metric(split, "per_class_f1", per_class_f1)
+            self.append_metric(
+                split, f"per_class_precision{metric_suffix}", per_class_precision
+            )
+            self.append_metric(
+                split, f"per_class_recall{metric_suffix}", per_class_recall
+            )
+            self.append_metric(split, f"per_class_f1{metric_suffix}", per_class_f1)
 
             # Overall metrics (macro average)
             self.append_metric(
-                split, "precision", float(np.mean(list(per_class_precision.values())))
+                split,
+                f"precision{metric_suffix}",
+                float(np.mean(list(per_class_precision.values()))),
             )
             self.append_metric(
-                split, "recall", float(np.mean(list(per_class_recall.values())))
+                split,
+                f"recall{metric_suffix}",
+                float(np.mean(list(per_class_recall.values()))),
             )
-            self.append_metric(split, "f1", float(np.mean(list(per_class_f1.values()))))
+            self.append_metric(
+                split, f"f1{metric_suffix}", float(np.mean(list(per_class_f1.values())))
+            )
 
     def add_marginal_metrics(self, control_exp_result: "ExperimentResult") -> None:
         assert (
@@ -181,7 +206,7 @@ class ExperimentResult:
             ) - control_exp_result.get_metric(split, metric, layer_num, cls)  # type: ignore
             return marginal_value
 
-        for split in ["train", "test"]:
+        for split in self.splits:
             for layer_num in range(self.get_num_layers()):
                 # Take the confusion matrix at the latest layer that has been recorded
                 cm: ndarray = self.get_metric(split, "cm", layer_num)  # type: ignore
@@ -281,7 +306,7 @@ class ExperimentResult:
         self.append_metric(split, "idxs_per_cm_cell", dict(idxs_per_cm_cell))
 
     def add_overlapping_idxs_metric(self, cummulative) -> None:
-        for split in ["train", "test"]:
+        for split in self.splits:
             idxs_per_cm_cell = self.get_metric(split, "idxs_per_cm_cell")
 
             cummulative_idxs: dict[str, set[int]] = idxs_per_cm_cell[0].copy()
@@ -372,7 +397,10 @@ class ExperimentResult:
 
     def get_num_layers(self) -> int:
         # Get the number of layers. We do it by getting the list of the accuracies over the layers.
-        return len(self.get_metric("test", "accuracy"))
+        try:
+            return len(self.get_metric("test", "accuracy"))
+        except KeyError:
+            return len(self.get_metric("test_a", "accuracy"))
 
     @staticmethod
     def get_filename(
@@ -712,7 +740,8 @@ def plot_metrics_by_group(
             if "per_class" in metric or "overlapping_idx_amounts" in metric:
                 # If we are dealing with a per-class metric, we add a plot for the requested label id
                 results_for_this_label: list[float] = [
-                    r.get(class_id, 0) for r in results
+                    r.get(class_id, 0)
+                    for r in results  # type: ignore
                 ]  # type: ignore
                 average_value: float = float(np.mean(results_for_this_label))
 
@@ -731,7 +760,7 @@ def plot_metrics_by_group(
                 )
             else:
                 # If we are dealing with a non-per-class metric, we simply plot the results
-                average_value: float = float(np.mean(results))
+                average_value: float = float(np.mean(results))  # type: ignore
                 lines_to_plot.append(
                     {
                         "layers": layers,

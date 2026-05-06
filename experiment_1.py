@@ -15,7 +15,7 @@ experiment_number = 1
 device: Literal["cuda", "cpu"] = "cuda" if t.cuda.is_available() else "cpu"
 
 
-def run_full_experiment(
+def run_full_experiment_1(
     language: str,
     probing_task: str,
     probe_type: str,
@@ -37,11 +37,9 @@ def run_full_experiment(
         experiment_number, language, probing_task, probe_type, model_name
     )
 
-    # If num_layers is specified, run experiment on those layers. Otherwise get the number of layers automatically
-    if num_layers:
-        layers: list[int] = list(range(num_layers))
-    else:
-        layers = list(range(get_number_of_layers_from_file(model_name)))
+    layers: list[int] = list(range(get_number_of_layers_from_file(model_name)))
+    if num_layers is not None:
+        layers = layers[:num_layers]
 
     # Run a sub-experiment in each layer
     for layer_num in layers:
@@ -127,7 +125,7 @@ def run_experiment_1(
     for model_name in model_names:
         for language in languages:
             # Run full experiment on control task
-            control_exp_result: ExperimentResult = run_full_experiment(
+            control_exp_result: ExperimentResult = run_full_experiment_1(
                 language,
                 control_task,
                 probe_type,
@@ -137,7 +135,7 @@ def run_experiment_1(
             )
 
             # Run full experiment on standard task
-            standard_exp_result: ExperimentResult = run_full_experiment(
+            standard_exp_result: ExperimentResult = run_full_experiment_1(
                 language,
                 standard_task,
                 probe_type,

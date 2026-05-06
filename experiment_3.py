@@ -163,7 +163,8 @@ def run_full_experiment(
         "test", "cm", confusion_matrix(test_labels, test_preds, labels=labels)
     )  # type: ignore
 
-    exp_result.add_metrics_from_confusion_matrix()
+    exp_result.add_metrics_from_confusion_matrix(include_unknown=False)
+    exp_result.add_metrics_from_confusion_matrix(include_unknown=True)
 
     # Add indices per confusion matrix cell for both splits
     exp_result.add_idxs_per_cm_cell_metric("train", train_labels, train_preds)

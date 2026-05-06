@@ -94,7 +94,7 @@ class LRProbe:
 
         return LRProbe(lr_model, scaler.mean_, scaler.scale_)
 
-    def refit(self, new_dataset, iterations) -> None:
+    def refit(self, new_dataset, iterations, force_refit_probe_creation) -> None:
         """
         Continue training the existing model on new data.
         """

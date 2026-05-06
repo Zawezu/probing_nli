@@ -87,7 +87,10 @@ def calculate_per_layer_cos_sims_over_extra_iters(
 
 
 def plot_cos_sim_confusion_matrix(
-    cos_sims_per_layer: dict[int, dict[Any, float]], layer_num: int, save
+    cos_sims_per_layer: dict[int, dict[Any, float]],
+    layer_num: int,
+    title: str,
+    save: bool,
 ) -> None:
     """
     Plot a confusion matrix of cosine similarities between language pairs.
@@ -125,7 +128,6 @@ def plot_cos_sim_confusion_matrix(
         fmt=".3f",
         cbar_kws={"label": "Cosine Similarity"},
     )
-    title = f"Cosine similarity confusion matrix of probes at layer {layer_num}"
     plt.title(title)
     plt.xlabel("Second Language")
     plt.ylabel("First Language")
@@ -140,7 +142,9 @@ def plot_cos_sim_confusion_matrix(
     plt.show()
 
 
-def plot_cos_sim_over_the_layers(cos_sims_per_layer, language_pairs, save) -> None:
+def plot_cos_sim_over_the_layers(
+    cos_sims_per_layer, language_pairs, title: str, save: bool
+) -> None:
     """
     Plot cosine similarity over layers for each language pair.
 
@@ -191,7 +195,6 @@ def plot_cos_sim_over_the_layers(cos_sims_per_layer, language_pairs, save) -> No
         col = idx % n_cols
         axes[row, col].set_visible(False)
 
-    title = "Cosine similarity over layers for probes of different language pairs"
     fig.suptitle(
         title,
         fontsize=14,
@@ -212,7 +215,7 @@ def plot_cos_sim_over_extra_iters(
     cos_sims_per_extra_iters: dict[int, dict[int, float]],
     layer_nums_to_plot: list[int],
     title: str,
-    save,
+    save: bool,
 ) -> None:
     num_layers: int = len(layer_nums_to_plot)
     n_cols: int = min(3, num_layers)  # Use up to 3 columns
@@ -308,10 +311,20 @@ if __name__ == "__main__":
                 print(cos_sims_per_layer)
 
                 for layer_num in list(cos_sims_per_layer.keys())[::10]:
-                    plot_cos_sim_confusion_matrix(cos_sims_per_layer, layer_num, save)
+                    plot_cos_sim_confusion_matrix(
+                        cos_sims_per_layer,
+                        layer_num,
+                        f"Cosine similarity confusion matrix of {model_name} probes at layer {layer_num}",
+                        save,
+                    )
 
                 language_pairs: list[tuple[str, str]] = list(combinations(languages, 2))
-                plot_cos_sim_over_the_layers(cos_sims_per_layer, language_pairs, save)
+                plot_cos_sim_over_the_layers(
+                    cos_sims_per_layer,
+                    language_pairs,
+                    f"Cosine similarity over layers for {model_name} probes of different language pairs",
+                    save,
+                )
     elif experiment_type == "per_extra_iter":
         num_refits = 5
         iterations_per_refit = 1
