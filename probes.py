@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch as t
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -27,7 +29,13 @@ mlp_training_parameters: dict[str, float | int] = {
 class LRProbe:
     """Sklearn-based logistic regression probe"""
 
-    def __init__(self, lr_model, scaler_mean, scaler_scale) -> None:
+    def __init__(
+        self,
+        lr_model,
+        scaler_mean,
+        scaler_scale,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """
         Initialise LRProbe.
 
@@ -36,9 +44,10 @@ class LRProbe:
             scaler_mean: Mean values from StandardScaler
             scaler_scale: Scale values from StandardScaler
         """
-        self.lr_model = lr_model
-        self.scaler_mean = scaler_mean
-        self.scaler_scale = scaler_scale
+        self.lr_model: LogisticRegression = lr_model
+        self.scaler_mean: float = scaler_mean
+        self.scaler_scale: float = scaler_scale
+        self.metadata: dict[str, Any] | None = metadata
 
     def _normalise(self, x):
         """normalise input using stored scaler parameters."""
@@ -92,9 +101,17 @@ class LRProbe:
         )
         lr_model.fit(X_scaled, y)
 
-        return LRProbe(lr_model, scaler.mean_, scaler.scale_)
+        metadata: dict[str, Any] = {
+            "language": dataset.language,
+            "split": dataset.split,
+            "layer_num": dataset.layer_num,
+            "probing_task": dataset.probing_task,
+            "model_name": dataset.model_name,
+        }
 
-    def refit(self, new_dataset, iterations, force_refit_probe_creation) -> None:
+        return LRProbe(lr_model, scaler.mean_, scaler.scale_, metadata)
+
+    def refit(self, new_dataset, iterations) -> None:
         """
         Continue training the existing model on new data.
         """
@@ -120,6 +137,12 @@ class LRProbe:
         vector_1: np.ndarray = self.get_vector().reshape(1, -1)
         vector_2: np.ndarray = second_lr_probe.get_vector().reshape(1, -1)
         return cosine_similarity(vector_1, vector_2)[0, 0]
+
+    def __str__(self) -> str:
+        try:
+            return f"Probe {', '.join(self.metadata.values())}"
+        except KeyError or ValueError:
+            return "Probe (Metadata missing)"
 
 
 def get_probe_filename(
@@ -198,11 +221,11 @@ def load_probe(
     filepath: Path = Path(PROBES_FOLDER) / model_name / filename
 
     with open(filepath, "rb") as f:
-        model = pickle.load(f)
+        probe = pickle.load(f)
 
     # print(f"Probe loaded from {filepath}")
 
-    return model
+    return probe
 
 
 def probe_exists(

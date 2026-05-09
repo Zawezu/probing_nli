@@ -1,47 +1,70 @@
 from typing import Any
 import os
 from pathlib import Path
-
-from probes import LRProbe, load_probe
-import argparse
-from itertools import combinations
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import argparse
 
+from probes import LRProbe, load_probe
 from utils import (
     LANGUAGES,
     MODEL_NAMES,
     PLOTS_FOLDER,
+    get_language_pair_combinations,
     get_number_of_layers_from_file,
     get_language_merged_string,
-    get_language_pairs,
+    get_language_pair_permutations,
 )
 
 # Create plots directory if it doesn't exist
 Path(PLOTS_FOLDER).mkdir(exist_ok=True)
 
 
+def print_highest_values_in_probe_coeficcients(probe, n=30):
+    with np.printoptions(threshold=sys.maxsize):
+        coef: np.ndarray = probe.get_vector()
+        idxs = np.argsort(coef)
+        highest_values = coef[idxs][-n:]
+
+        print(f"-------------\n{n} highest values of the coefficient of {probe}:")
+        print(highest_values)
+
+
 def calculate_per_layer_cos_sims_between_langs(
-    model_name: str, probing_task: str, languages: list[str]
+    model_name: str, probing_task: str, languages: list[str], extra_iters: int = 0
 ) -> dict[int, dict[str, float]]:
     cos_sims_per_layer: dict[int, dict[str, float]] = {}
 
-    language_pairs: list[tuple[str, str]] = get_language_pairs(languages)
+    language_pairs: list[tuple[str, str]] = get_language_pair_permutations(languages)
     print(language_pairs)
     num_layers: int = get_number_of_layers_from_file(model_name)
     for layer_num in range(num_layers):
         cos_sims_per_layer[layer_num] = {}
         for language_a, language_b in language_pairs:
             probe_a: LRProbe = load_probe(
-                language_a, layer_num, probing_task, "lr", model_name
+                language_a,
+                layer_num,
+                probing_task,
+                "lr",
+                model_name,
+                extra_iters=extra_iters,
             )
             probe_b: LRProbe = load_probe(
-                language_b, layer_num, probing_task, "lr", model_name
+                language_b,
+                layer_num,
+                probing_task,
+                "lr",
+                model_name,
+                extra_iters=extra_iters,
             )
 
             cos_sim: float = probe_a.calculate_cosine_similarity(probe_b)
             cos_sims_per_layer[layer_num][f"{language_a},{language_b}"] = cos_sim
+
+            print_highest_values_in_probe_coeficcients(probe_a)
+            print_highest_values_in_probe_coeficcients(probe_b)
 
     return cos_sims_per_layer
 
@@ -80,6 +103,9 @@ def calculate_per_layer_cos_sims_over_extra_iters(
                 extra_iters,
             )
 
+            print_highest_values_in_probe_coeficcients(original_probe)
+            print_highest_values_in_probe_coeficcients(refitted_probe)
+
             cos_sim: float = original_probe.calculate_cosine_similarity(refitted_probe)
             cos_sims_per_extra_iters[layer_num][extra_iters] = cos_sim
 
@@ -91,6 +117,9 @@ def plot_cos_sim_confusion_matrix(
     layer_num: int,
     title: str,
     save: bool,
+    show: bool,
+    vmin: float = 0.0,
+    vmax: float = 1.0,
 ) -> None:
     """
     Plot a confusion matrix of cosine similarities between language pairs.
@@ -127,6 +156,8 @@ def plot_cos_sim_confusion_matrix(
         annot=True,
         fmt=".3f",
         cbar_kws={"label": "Cosine Similarity"},
+        vmin=vmin,
+        vmax=vmax,
     )
     plt.title(title)
     plt.xlabel("Second Language")
@@ -139,11 +170,12 @@ def plot_cos_sim_confusion_matrix(
         filepath = os.path.join(PLOTS_FOLDER, filename)
         plt.savefig(filepath, dpi=100, bbox_inches="tight")
 
-    plt.show()
+    if show:
+        plt.show()
 
 
 def plot_cos_sim_over_the_layers(
-    cos_sims_per_layer, language_pairs, title: str, save: bool
+    cos_sims_per_layer, language_pairs, title: str, save: bool, show: bool
 ) -> None:
     """
     Plot cosine similarity over layers for each language pair.
@@ -208,7 +240,8 @@ def plot_cos_sim_over_the_layers(
         filepath = os.path.join(PLOTS_FOLDER, filename)
         plt.savefig(filepath, dpi=100, bbox_inches="tight")
 
-    plt.show()
+    if show:
+        plt.show()
 
 
 def plot_cos_sim_over_extra_iters(
@@ -216,6 +249,7 @@ def plot_cos_sim_over_extra_iters(
     layer_nums_to_plot: list[int],
     title: str,
     save: bool,
+    show: bool,
 ) -> None:
     num_layers: int = len(layer_nums_to_plot)
     n_cols: int = min(3, num_layers)  # Use up to 3 columns
@@ -263,7 +297,8 @@ def plot_cos_sim_over_extra_iters(
         filepath = os.path.join(PLOTS_FOLDER, filename)
         plt.savefig(filepath, dpi=100, bbox_inches="tight")
 
-    plt.show()
+    if show:
+        plt.show()
 
 
 if __name__ == "__main__":
@@ -275,6 +310,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t", help="enter the probing tasks", nargs="*", default=["standard"]
     )
+    parser.add_argument(
+        "-ei",
+        help="enter the extra iterations (only for per_layer)",
+        nargs="*",
+        default=[0],
+    )
 
     parser.add_argument(
         "-e",
@@ -283,7 +324,15 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "-s",
+        "-sv",
+        help="whether to save the plot or not",
+        nargs="?",
+        default="False",
+        const="True",
+    )
+
+    parser.add_argument(
+        "-sh",
         help="whether to save the plot or not",
         nargs="?",
         default="False",
@@ -296,41 +345,66 @@ if __name__ == "__main__":
     model_names: list[str] = args.m
     languages: list[str] = args.l
     probing_tasks: list[str] = args.t
+    extra_iter_nums: list[int] = [int(ei) for ei in args.ei]
     experiment_type: str = args.e
-    save: bool = args.s
+    save: bool = args.sv.lower() == "true"
+    show: bool = args.sh.lower() == "true"
+
+    if extra_iter_nums != [0] and experiment_type != "per_layer":
+        raise ValueError("ei can only be specified if the experiment type is per_layer")
 
     if experiment_type == "per_layer":
         for model_name in model_names:
             for probing_task in probing_tasks:
-                cos_sims_per_layer: dict[int, dict[str, float]] = (
-                    calculate_per_layer_cos_sims_between_langs(
-                        model_name, probing_task, languages
+                for extra_iters in extra_iter_nums:
+                    if extra_iters == 0:
+                        languages_to_calculate: list[str] = languages
+                    else:
+                        # We replace the languages by the permutations of lanugages, in merged string form
+                        languages_to_calculate = [
+                            get_language_merged_string(lp)
+                            for lp in get_language_pair_permutations(languages)
+                        ]
+
+                    language_pairs: list[tuple[str, str]] = (
+                        get_language_pair_combinations(languages_to_calculate)
                     )
-                )
 
-                print(cos_sims_per_layer)
+                    cos_sims_per_layer: dict[int, dict[str, float]] = (
+                        calculate_per_layer_cos_sims_between_langs(
+                            model_name,
+                            probing_task,
+                            languages_to_calculate,
+                            extra_iters=extra_iters,
+                        )
+                    )
 
-                for layer_num in list(cos_sims_per_layer.keys())[::10]:
-                    plot_cos_sim_confusion_matrix(
+                    print(cos_sims_per_layer)
+
+                    for layer_num in list(cos_sims_per_layer.keys())[::10]:
+                        plot_cos_sim_confusion_matrix(
+                            cos_sims_per_layer,
+                            layer_num,
+                            f"Cosine similarity comparison of {model_name} probes at layer {layer_num} refitted for {extra_iters} iterations",
+                            save,
+                            show,
+                        )
+
+                    plot_cos_sim_over_the_layers(
                         cos_sims_per_layer,
-                        layer_num,
-                        f"Cosine similarity confusion matrix of {model_name} probes at layer {layer_num}",
+                        language_pairs,
+                        f"Cosine similarity over layers for {model_name} probes of different language pairs refitted for {extra_iters} iterations",
                         save,
+                        show,
                     )
-
-                language_pairs: list[tuple[str, str]] = list(combinations(languages, 2))
-                plot_cos_sim_over_the_layers(
-                    cos_sims_per_layer,
-                    language_pairs,
-                    f"Cosine similarity over layers for {model_name} probes of different language pairs",
-                    save,
-                )
     elif experiment_type == "per_extra_iter":
         num_refits = 5
         iterations_per_refit = 1
         for model_name in model_names:
             for probing_task in probing_tasks:
-                language_pairs: list[tuple[str, str]] = get_language_pairs(languages)
+                language_pairs: list[tuple[str, str]] = get_language_pair_permutations(
+                    languages
+                )
 
                 for language_pair in language_pairs:
                     cos_sims_per_extra_iters: dict[int, dict[int, float]] = (
@@ -352,6 +426,7 @@ if __name__ == "__main__":
                         layer_nums_to_plot,
                         f"Cosine similarity over extra iters for probes of {model_name} on the {probing_task} {language_pair} task at different layers",
                         save,
+                        show,
                     )
 
     else:

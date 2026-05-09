@@ -1,4 +1,4 @@
-from itertools import permutations
+from itertools import permutations, combinations
 from typing import LiteralString
 # import os
 
@@ -37,14 +37,20 @@ LANGUAGE_FULL_NAME_MAP: dict[str, str] = {
     "en": "English",
     "es": "Spanish",
     "jp": "Japanese",
-    "en→es": "trained in English, tested in Spanish",
-    "en→jp": "trained in English, tested in Japanese",
-    "es→en": "trained in Spanish, tested in English",
-    "es→jp": "trained in Spanish, tested in Japanese",
-    "jp→en": "trained in Japanese, tested in English",
-    "jp→es": "trained in Japanese, tested in Spanish",
 }
 SPLITS: list[str] = ["train", "test", "val"]
+
+
+def get_verbose_version_of_language_string(language: str):
+    if "→" in language:
+        languages: list[str] = language.split("→")
+        if languages[0] == languages[1]:
+            return f"trained and refitted in {LANGUAGE_FULL_NAME_MAP[languages[0]]}"
+        else:
+            return f"trained in {LANGUAGE_FULL_NAME_MAP[languages[0]]}, refitted in {LANGUAGE_FULL_NAME_MAP[languages[1]]}"
+    else:
+        return LANGUAGE_FULL_NAME_MAP[language]
+
 
 # Experiment constants
 EXPERIMENT_RESULTS_FOLDER = "./data/experiment_results"
@@ -130,8 +136,15 @@ def get_all_language_merged_strings(language_pairs: list[tuple[str, str]]) -> li
     return merged_string_list
 
 
-def get_language_pairs(languages: list[str]) -> list[tuple[str, str]]:
+def get_language_pair_permutations(languages: list[str]) -> list[tuple[str, str]]:
     """
-    Gets a list of all possible language pairs given a list of languages
+    Gets a list of all permuations (order matters) of language pairs given a list of languages
     """
     return list(permutations(languages, 2))
+
+
+def get_language_pair_combinations(languages: list[str]) -> list[tuple[str, str]]:
+    """
+    Gets a list of all combinations (order doesn't matter) of language pairs given a list of languages
+    """
+    return list(combinations(languages, 2))

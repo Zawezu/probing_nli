@@ -125,11 +125,7 @@ def run_full_experiment_2(
                 else:
                     # Otherwise, refit and save the probe
                     # We refit the probe on the training set of language b for a limited number of iterations
-                    probe.refit(
-                        activation_dataset_train_b,
-                        iterations_per_refit,
-                        force_refit_probe_creation,
-                    )
+                    probe.refit(activation_dataset_train_b, iterations_per_refit)
 
                     if save_refitted_probes:
                         save_probe(

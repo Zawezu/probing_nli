@@ -16,6 +16,7 @@ from utils import (
     LABEL_MAP,
     LANGUAGE_FULL_NAME_MAP,
     REVERSE_LABEL_MAP,
+    get_verbose_version_of_language_string,
 )
 
 mlp_training_parameters: dict[str, float | int] = {
@@ -667,7 +668,7 @@ def plot_metrics_by_group(
             split: str = line_request["split"]
             class_name: str = line_request["class_name"]
             attrs: dict[str, str] = {
-                "language": LANGUAGE_FULL_NAME_MAP[exp_result.language],
+                "language": get_verbose_version_of_language_string(exp_result.language),
                 "probing_task": exp_result.probing_task,
                 "probe_type": exp_result.probe_type,
                 "model_name": exp_result.model_name,
