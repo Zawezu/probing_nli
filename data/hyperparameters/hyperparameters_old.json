@@ -2,7 +2,7 @@
   "olmo_model": {
     "en": {
       "0": {
-        "C": 0.01,
+        "C": 0.1,
         "fit_intercept": true
       },
       "1": {
@@ -22,7 +22,7 @@
         "fit_intercept": true
       },
       "5": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "6": {
@@ -38,11 +38,11 @@
         "fit_intercept": true
       },
       "9": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "10": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "11": {
@@ -54,71 +54,71 @@
         "fit_intercept": true
       },
       "13": {
-        "C": 10.0,
+        "C": 0.01,
         "fit_intercept": true
       },
       "14": {
-        "C": 1.0,
+        "C": 0.01,
         "fit_intercept": true
       },
       "15": {
-        "C": 0.1,
-        "fit_intercept": false
+        "C": 0.01,
+        "fit_intercept": true
       },
       "16": {
-        "C": 0.1,
-        "fit_intercept": false
+        "C": 0.01,
+        "fit_intercept": true
       },
       "17": {
-        "C": 1.0,
-        "fit_intercept": false
+        "C": 0.1,
+        "fit_intercept": true
       },
       "18": {
-        "C": 1.0,
-        "fit_intercept": false
+        "C": 0.01,
+        "fit_intercept": true
       },
       "19": {
-        "C": 0.1,
-        "fit_intercept": false
+        "C": 0.01,
+        "fit_intercept": true
       },
       "20": {
-        "C": 10.0,
+        "C": 1.0,
         "fit_intercept": true
       },
       "21": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "22": {
-        "C": 0.01,
-        "fit_intercept": true
-      },
-      "23": {
-        "C": 10.0,
-        "fit_intercept": true
-      },
-      "24": {
-        "C": 10.0,
-        "fit_intercept": true
-      },
-      "25": {
         "C": 1.0,
         "fit_intercept": true
       },
-      "26": {
-        "C": 10.0,
+      "23": {
+        "C": 1.0,
         "fit_intercept": true
       },
-      "27": {
+      "24": {
         "C": 0.1,
+        "fit_intercept": false
+      },
+      "25": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "26": {
+        "C": 1.0,
+        "fit_intercept": false
+      },
+      "27": {
+        "C": 0.01,
         "fit_intercept": true
       },
       "28": {
         "C": 0.1,
-        "fit_intercept": false
+        "fit_intercept": true
       },
       "29": {
-        "C": 0.001,
+        "C": 1.0,
         "fit_intercept": true
       },
       "30": {
@@ -126,17 +126,17 @@
         "fit_intercept": true
       },
       "31": {
-        "C": 1.0,
+        "C": 0.001,
         "fit_intercept": true
       }
     },
     "es": {
       "0": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "1": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "2": {
@@ -153,7 +153,7 @@
       },
       "5": {
         "C": 0.01,
-        "fit_intercept": false
+        "fit_intercept": true
       },
       "6": {
         "C": 0.01,
@@ -164,7 +164,7 @@
         "fit_intercept": true
       },
       "8": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "9": {
@@ -180,7 +180,137 @@
         "fit_intercept": true
       },
       "12": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "13": {
         "C": 0.001,
+        "fit_intercept": true
+      },
+      "14": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "15": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "16": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "17": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "18": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "19": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "20": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "21": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "22": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "23": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "24": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "25": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "26": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "27": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "28": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "29": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "30": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "31": {
+        "C": 0.001,
+        "fit_intercept": true
+      }
+    },
+    "jp": {
+      "0": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "1": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "2": {
+        "C": 0.1,
+        "fit_intercept": true
+      },
+      "3": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "4": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "5": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "6": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "7": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "8": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "9": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "10": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "11": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "12": {
+        "C": 0.01,
         "fit_intercept": true
       },
       "13": {
@@ -188,11 +318,11 @@
         "fit_intercept": true
       },
       "14": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "15": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "16": {
@@ -212,11 +342,11 @@
         "fit_intercept": true
       },
       "20": {
-        "C": 10.0,
+        "C": 0.1,
         "fit_intercept": true
       },
       "21": {
-        "C": 0.01,
+        "C": 0.1,
         "fit_intercept": true
       },
       "22": {
@@ -224,11 +354,11 @@
         "fit_intercept": true
       },
       "23": {
-        "C": 0.01,
+        "C": 0.1,
         "fit_intercept": true
       },
       "24": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "25": {
@@ -236,11 +366,11 @@
         "fit_intercept": true
       },
       "26": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "27": {
-        "C": 0.001,
+        "C": 1.0,
         "fit_intercept": true
       },
       "28": {
@@ -256,7 +386,7 @@
         "fit_intercept": true
       },
       "31": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       }
     }
@@ -264,11 +394,11 @@
   "tiny_aya_global": {
     "en": {
       "0": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "1": {
-        "C": 0.01,
+        "C": 0.1,
         "fit_intercept": true
       },
       "2": {
@@ -276,7 +406,7 @@
         "fit_intercept": true
       },
       "3": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "4": {
@@ -288,15 +418,15 @@
         "fit_intercept": true
       },
       "6": {
-        "C": 0.01,
-        "fit_intercept": true
-      },
-      "7": {
         "C": 0.001,
         "fit_intercept": true
       },
-      "8": {
+      "7": {
         "C": 0.01,
+        "fit_intercept": true
+      },
+      "8": {
+        "C": 0.001,
         "fit_intercept": true
       },
       "9": {
@@ -304,23 +434,23 @@
         "fit_intercept": true
       },
       "10": {
-        "C": 0.1,
+        "C": 0.001,
         "fit_intercept": true
       },
       "11": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "12": {
-        "C": 10.0,
+        "C": 0.001,
         "fit_intercept": true
       },
       "13": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "14": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "15": {
@@ -328,11 +458,11 @@
         "fit_intercept": true
       },
       "16": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "17": {
-        "C": 0.01,
+        "C": 0.1,
         "fit_intercept": true
       },
       "18": {
@@ -340,20 +470,20 @@
         "fit_intercept": true
       },
       "19": {
-        "C": 0.01,
-        "fit_intercept": true
+        "C": 0.001,
+        "fit_intercept": false
       },
       "20": {
         "C": 0.01,
-        "fit_intercept": true
+        "fit_intercept": false
       },
       "21": {
-        "C": 0.1,
-        "fit_intercept": true
+        "C": 0.01,
+        "fit_intercept": false
       },
       "22": {
-        "C": 1.0,
-        "fit_intercept": true
+        "C": 0.01,
+        "fit_intercept": false
       },
       "23": {
         "C": 0.01,
@@ -364,11 +494,11 @@
         "fit_intercept": true
       },
       "25": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "26": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "27": {
@@ -376,7 +506,7 @@
         "fit_intercept": true
       },
       "28": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "29": {
@@ -384,7 +514,7 @@
         "fit_intercept": true
       },
       "30": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "31": {
@@ -393,7 +523,7 @@
       },
       "32": {
         "C": 0.01,
-        "fit_intercept": false
+        "fit_intercept": true
       },
       "33": {
         "C": 0.01,
@@ -410,11 +540,11 @@
     },
     "es": {
       "0": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "1": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "2": {
@@ -422,7 +552,7 @@
         "fit_intercept": true
       },
       "3": {
-        "C": 0.1,
+        "C": 0.001,
         "fit_intercept": true
       },
       "4": {
@@ -438,7 +568,7 @@
         "fit_intercept": true
       },
       "7": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "8": {
@@ -446,7 +576,7 @@
         "fit_intercept": true
       },
       "9": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "10": {
@@ -454,7 +584,7 @@
         "fit_intercept": true
       },
       "11": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "12": {
@@ -463,26 +593,26 @@
       },
       "13": {
         "C": 0.01,
-        "fit_intercept": true
+        "fit_intercept": false
       },
       "14": {
-        "C": 1.0,
+        "C": 0.01,
         "fit_intercept": true
       },
       "15": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "16": {
         "C": 0.01,
-        "fit_intercept": true
+        "fit_intercept": false
       },
       "17": {
-        "C": 0.001,
+        "C": 0.1,
         "fit_intercept": true
       },
       "18": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "19": {
@@ -494,7 +624,7 @@
         "fit_intercept": true
       },
       "21": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "22": {
@@ -502,16 +632,16 @@
         "fit_intercept": false
       },
       "23": {
-        "C": 0.01,
+        "C": 0.1,
         "fit_intercept": true
       },
       "24": {
-        "C": 0.01,
+        "C": 0.1,
         "fit_intercept": true
       },
       "25": {
         "C": 0.01,
-        "fit_intercept": true
+        "fit_intercept": false
       },
       "26": {
         "C": 0.01,
@@ -522,11 +652,11 @@
         "fit_intercept": true
       },
       "28": {
-        "C": 0.01,
+        "C": 0.001,
         "fit_intercept": true
       },
       "29": {
-        "C": 0.1,
+        "C": 0.01,
         "fit_intercept": true
       },
       "30": {
@@ -535,23 +665,169 @@
       },
       "31": {
         "C": 0.01,
+        "fit_intercept": true
+      },
+      "32": {
+        "C": 0.01,
         "fit_intercept": false
+      },
+      "33": {
+        "C": 0.1,
+        "fit_intercept": false
+      },
+      "34": {
+        "C": 0.1,
+        "fit_intercept": false
+      },
+      "35": {
+        "C": 0.1,
+        "fit_intercept": true
+      }
+    },
+    "jp": {
+      "0": {
+        "C": 1.0,
+        "fit_intercept": true
+      },
+      "1": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "2": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "3": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "4": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "5": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "6": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "7": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "8": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "9": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "10": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "11": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "12": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "13": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "14": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "15": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "16": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "17": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "18": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "19": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "20": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "21": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "22": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "23": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "24": {
+        "C": 0.1,
+        "fit_intercept": true
+      },
+      "25": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "26": {
+        "C": 0.001,
+        "fit_intercept": true
+      },
+      "27": {
+        "C": 10.0,
+        "fit_intercept": true
+      },
+      "28": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "29": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "30": {
+        "C": 0.01,
+        "fit_intercept": true
+      },
+      "31": {
+        "C": 0.01,
+        "fit_intercept": true
       },
       "32": {
         "C": 0.01,
         "fit_intercept": true
       },
       "33": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "34": {
-        "C": 0.001,
+        "C": 0.01,
         "fit_intercept": true
       },
       "35": {
-        "C": 0.01,
-        "fit_intercept": false
+        "C": 0.001,
+        "fit_intercept": true
       }
     }
   }

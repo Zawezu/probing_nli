@@ -161,7 +161,7 @@ class LRProbe:
             similarities = {}
             for i in range(vector_1.shape[0]):
                 sim = cosine_similarity(vector_1[i : i + 1], vector_2[i : i + 1])[0, 0]
-                similarities[i] = sim
+                similarities[int(self.lr_model.classes_[i])] = sim
             return similarities
         else:
             vector_1 = self.get_vector(per_class=False)  # shape (1, 3n+3)
@@ -169,33 +169,33 @@ class LRProbe:
             sim = cosine_similarity(vector_1, vector_2)[0, 0]
             return {0: sim}
 
-    def calculate_l2_norm(
+    def calculate_l2_dist(
         self, second_lr_probe: "LRProbe", per_class: bool = False
     ) -> dict[int, float]:
         """
-        Calculate L2 norm (Euclidean distance) between this probe and another.
+        Calculate L2 dist (Euclidean distance) between this probe and another.
 
         Args:
             second_lr_probe: The other LRProbe to compare with
-            per_class: If True, return L2 norm for each class separately.
-                      If False, return L2 norm for the flattened vectors as class 0.
+            per_class: If True, return L2 dist for each class separately.
+                      If False, return L2 dist for the flattened vectors as class 0.
 
         Returns:
-            Dictionary mapping class index to L2 norm value
+            Dictionary mapping class index to L2 dist value
         """
         if per_class:
             vector_1 = self.get_vector(per_class=True)  # shape (3, n+1)
             vector_2 = second_lr_probe.get_vector(per_class=True)  # shape (3, n+1)
-            l2_norms = {}
+            l2_dists = {}
             for i in range(vector_1.shape[0]):
-                norm = np.linalg.norm(vector_1[i] - vector_2[i])
-                l2_norms[i] = norm
-            return l2_norms
+                dist = np.linalg.norm(vector_1[i] - vector_2[i])
+                l2_dists[int(self.lr_model.classes_[i])] = dist
+            return l2_dists
         else:
             vector_1 = self.get_vector(per_class=False)  # shape (1, 3n+3)
             vector_2 = second_lr_probe.get_vector(per_class=False)  # shape (1, 3n+3)
-            norm = np.linalg.norm(vector_1 - vector_2)
-            return {0: norm}
+            dist = np.linalg.norm(vector_1 - vector_2)
+            return {0: dist}  # type: ignore
 
     def __str__(self) -> str:
         try:

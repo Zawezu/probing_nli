@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
 from tqdm import tqdm
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import json
 import sys
 from icecream import ic
@@ -24,13 +25,20 @@ device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
 
 class SpecialCase:
-    def __init__(self, language: str, split: str, start_from_batch: int | None) -> None:
+    def __init__(
+        self,
+        language: str,
+        split: str,
+        start_from_batch: int | None,
+        end_at_batch: int | None = None,
+    ) -> None:
         self.language: str = language
         self.split: str = split
         self.start_from_batch: int | None = start_from_batch
+        self.end_at_batch: int | None = end_at_batch
 
     def __str__(self) -> str:
-        return f"SpecialCase(language={self.language}, split={self.split}, start_from_batch={self.start_from_batch})"
+        return f"SpecialCase(language={self.language}, split={self.split}, start_from_batch={self.start_from_batch}, end_at_batch={self.end_at_batch})"
 
 
 class ActivationRecorder:
@@ -133,6 +141,7 @@ class ActivationRecorder:
         amount_of_batches_to_generate=None,
         batch_size: int = 128,
         start_from_batch: int = 0,
+        end_at_batch: int | None = None,
     ) -> None:
         """
         Iterate through `dataloader` in batches, processing all sentences in each batch together.
@@ -175,6 +184,7 @@ class ActivationRecorder:
         else:
             max_new_tokens = 4
 
+        save_executor = ThreadPoolExecutor(max_workers=2)
         try:
             for batch_num, (
                 sentence_tuple_batch,
@@ -187,6 +197,8 @@ class ActivationRecorder:
             ):
                 if batch_num < start_from_batch:  # skip until we reach the resume point
                     continue
+                if end_at_batch is not None and batch_num >= end_at_batch:
+                    break
 
                 batch_acts_by_layer: dict[int, t.Tensor] = {}
 
@@ -228,7 +240,7 @@ class ActivationRecorder:
                     self.tokenizer.decode(
                         ids[input_length:],
                         skip_special_tokens=True,
-                        clean_up_tokenization_spaces=True,
+                        clean_up_tokenization_spaces=False,
                     )
                     .encode("utf-8", errors="replace")
                     .decode("utf-8")
@@ -240,16 +252,18 @@ class ActivationRecorder:
 
                 # Save batch and reset
                 if save_to_disk:
-                    self._save_batch(
+                    save_executor.submit(
+                        self._save_batch,
                         batch_acts_by_layer,
                         language,
                         split,
                         batch_id,
                     )
-                    self._save_batch_responses(
+                    save_executor.submit(
+                        self._save_batch_responses,
                         messages_batch,
                         trimmed_responses,
-                        original_ids,
+                        original_ids.tolist(),
                         language,
                         split,
                         batch_id,
@@ -264,6 +278,7 @@ class ActivationRecorder:
         finally:
             for handle in hook_handles:
                 handle.remove()
+            save_executor.shutdown(wait=True)
 
     def load_model(self) -> None:
         model_filepath: str = f"{MODELS_FOLDER}/{self.model_name}"
@@ -272,9 +287,13 @@ class ActivationRecorder:
         )
 
         self.tokenizer.chat_template = CHAT_TEMPLATES[self.model_name]
+        self.tokenizer.padding_side = "left"
 
         self.hf_model = AutoModelForCausalLM.from_pretrained(
-            model_filepath, local_files_only=True
+            model_filepath,
+            local_files_only=True,
+            dtype=t.bfloat16,
+            attn_implementation="flash_attention_2",
         ).to(device)  # type: ignore
 
         n_layers_txt_filepath: str = get_n_layers_txt_filepath(self.model_name)
@@ -307,6 +326,8 @@ class ActivationRecorder:
                 return f"Premisa: {sent_a}\nHipótesis: {sent_b}\nClasificación: "
             case "jp":
                 return f"前提：{sent_a}\n仮説：{sent_b}\n分類："
+            case "nl":
+                return f"Premisse: {sent_a}\nHypothese: {sent_b}\nClassificatie: "
             case _:
                 raise KeyError(f"Language {language} is not supported")
 
@@ -360,6 +381,7 @@ class ActivationRecorder:
                 start_from_batch: int = 0
 
                 skip_split = False
+                end_at_batch: int | None = None
                 # Handle special cases where we want to start generating from another batch or skip a split.
                 for special_case in special_cases:
                     if (
@@ -376,6 +398,11 @@ class ActivationRecorder:
                             print(
                                 f"Handling special case: {special_case}. Starting from batch {special_case.start_from_batch}"
                             )
+                        if special_case.end_at_batch is not None:
+                            end_at_batch = special_case.end_at_batch
+                            print(
+                                f"Handling special case: {special_case}. Ending at batch {special_case.end_at_batch}"
+                            )
 
                 if not skip_split:
                     self.generate_activations(
@@ -385,6 +412,7 @@ class ActivationRecorder:
                         amount_of_batches_to_generate=amount_of_batches_to_generate,
                         batch_size=batch_size,
                         start_from_batch=start_from_batch,
+                        end_at_batch=end_at_batch,
                     )
 
 
@@ -633,35 +661,47 @@ if __name__ == "__main__":
     amount_of_batches_to_generate: int | None = None
     splits_to_generate: list[str] = SPLITS
 
-    debug = False
+    model_name: str = sys.argv[1]
+
+    languages_to_generate_arg: str = sys.argv[2]
+    languages_to_generate: list[str] = languages_to_generate_arg.split(",")
+
+    batch_size = int(sys.argv[3])
+
+    try:
+        debug: bool = sys.argv[4] == "debug"
+    except IndexError:
+        debug = False
+
     if debug:
         splits_to_generate = ["train"]
         amount_of_batches_to_generate = 2
         batch_size = 4
         print("Running in debug mode")
 
-    ic(save_to_disk, amount_of_batches_to_generate, splits_to_generate)
-
-    assert save_to_disk, "If generating, must also save to disk"
-
-    # ------------------------------
-
-    model_name: str = sys.argv[1]
-    languages_to_generate_arg: str = sys.argv[2]
-    batch_size = int(sys.argv[3])
-
-    print(f"model_name = {model_name}")
-    print(f"batch_size = {batch_size}")
-
-    languages_to_generate: list[str] = languages_to_generate_arg.split(",")
-
-    print(f"languages_to_generate = {languages_to_generate}")
+    ic(
+        debug,
+        save_to_disk,
+        amount_of_batches_to_generate,
+        splits_to_generate,
+        model_name,
+        batch_size,
+    )
 
     # ------------------------------
 
     activation_recorder: ActivationRecorder = ActivationRecorder(model_name)
 
     special_cases: list[SpecialCase] = []
+
+    if model_name == "olmo_model":
+        special_cases.extend(
+            [
+                SpecialCase("nl", "test", 0, end_at_batch=14),
+                SpecialCase("nl", "val", None),
+                SpecialCase("nl", "train", None),
+            ]
+        )
 
     activation_recorder.generate_all_activations(
         languages_to_generate,

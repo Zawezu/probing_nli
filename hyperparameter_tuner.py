@@ -152,7 +152,10 @@ if __name__ == "__main__":
         num_layers = 1
         print("Using custom configuration")
 
-    ic(custom, model_names, languages, num_layers)
+    # exceptions: list[tuple[str, str]] = []
+    exceptions = [("olmo_model", "en"), ("olmo_model", "es")]
+
+    ic(custom, model_names, languages, num_layers, exceptions)
 
     # Aggregate hyperparameters for all model/language combinations
     all_hyperparameters: dict = {}
@@ -166,13 +169,14 @@ if __name__ == "__main__":
             num_layers_for_this_model = num_layers
 
         for language in languages:
-            hyperparameters: dict = optimise_hyperparameters_all_layers(
-                model_name, language, num_layers_for_this_model
-            )
-            print(
-                f"Best hyperparameters for {model_name} in {language}:\n{hyperparameters}"
-            )
-            all_hyperparameters[model_name][language] = hyperparameters
+            if ((model_name, language)) not in exceptions:
+                hyperparameters: dict = optimise_hyperparameters_all_layers(
+                    model_name, language, num_layers_for_this_model
+                )
+                print(
+                    f"Best hyperparameters for {model_name} in {language}:\n{hyperparameters}"
+                )
+                all_hyperparameters[model_name][language] = hyperparameters
 
     # Save all hyperparameters to JSON
     save_hyperparameters(all_hyperparameters)

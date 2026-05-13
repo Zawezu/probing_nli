@@ -5,7 +5,12 @@ from typing import LiteralString
 # SICK constants
 SICK_FOLDER = "./data/sick"
 
-SICK_DIRTY_FOLDERS: dict[str, str] = {"en": "sick_en", "es": "sick_es", "jp": "jsick"}
+SICK_DIRTY_FOLDERS: dict[str, str] = {
+    "en": "sick_en",
+    "es": "sick_es",
+    "jp": "jsick",
+    "nl": "sick_nl",
+}
 SICK_DIRTY_EN_FILE = "SICK_annotated.txt"
 SICK_DIRTY_ES_FILE: dict[str, str] = {
     "train": "SICK_train.txt",
@@ -13,6 +18,7 @@ SICK_DIRTY_ES_FILE: dict[str, str] = {
     "trial": "SICK_trial.txt",
 }
 SICK_DIRTY_JP_FILE = "jsick.tsv"
+SICK_DIRTY_NL_FILE = "SICK_NL.txt"
 
 MERGED_SICK_FILEPATH: LiteralString = f"{SICK_FOLDER}/SICK_merged.json"
 
@@ -32,11 +38,12 @@ MODEL_IDS: dict[str, str] = {
 ACTIVATIONS_FOLDER = "./data/activations"
 
 # Other constants
-LANGUAGES: list[str] = ["en", "es", "jp"]
+LANGUAGES: list[str] = ["en", "es", "jp", "nl"]
 LANGUAGE_FULL_NAME_MAP: dict[str, str] = {
     "en": "English",
     "es": "Spanish",
     "jp": "Japanese",
+    "nl": "Dutch",
 }
 SPLITS: list[str] = ["train", "test", "val"]
 
@@ -91,6 +98,7 @@ SYSTEM_PROMPTS = {
     "en": "You are a textual entailment classifier. Always respond with exactly one word: entailment, contradiction, or neutral.",
     "es": "Eres un clasificador de implicación textual. Responde siempre con una sola palabra: implicación, contradicción o neutral.",
     "jp": "あなたはテキスト含意分類器です。常に一言で答えてください：含意、矛盾、または中立。",
+    "nl": "Jij bent een classificator van tekstuele implicaties. Reageer altijd met precies één woord: implicatie, tegenspraak of neutraal.",
 }
 FEW_SHOT_EXAMPLES = {
     "en": (
@@ -104,6 +112,10 @@ FEW_SHOT_EXAMPLES = {
     "jp": (
         "前提：犬が走っている。\n仮説：動物が動いている。",
         "含意",
+    ),
+    "nl": (
+        "Premisse: Een hond rent.\nHypothese: Een dier beweegt.",
+        "implicatie",
     ),
 }
 

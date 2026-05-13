@@ -29,18 +29,18 @@ def get_similarity_function(probe: LRProbe, sim_func: str):
 
     Args:
         probe: The LRProbe instance
-        sim_func: Either "cos_sim" or "l2_norm"
+        sim_func: Either "cos_sim" or "l2_dist"
 
     Returns:
-        The corresponding method (calculate_cosine_similarity or calculate_l2_norm)
+        The corresponding method (calculate_cosine_similarity or calculate_l2_dist)
     """
     if sim_func == "cos_sim":
         return probe.calculate_cosine_similarity
-    elif sim_func == "l2_norm":
-        return probe.calculate_l2_norm
+    elif sim_func == "l2_dist":
+        return probe.calculate_l2_dist
     else:
         raise ValueError(
-            f"Unknown similarity function: {sim_func}. Must be 'cos_sim' or 'l2_norm'"
+            f"Unknown similarity function: {sim_func}. Must be 'cos_sim' or 'l2_dist'"
         )
 
 
@@ -49,18 +49,18 @@ def get_similarity_metric_name(sim_func: str) -> str:
     Get human-readable name for the similarity metric.
 
     Args:
-        sim_func: Either "cos_sim" or "l2_norm"
+        sim_func: Either "cos_sim" or "l2_dist"
 
     Returns:
         Human-readable metric name
     """
     if sim_func == "cos_sim":
-        return "Cosine Similarity"
-    elif sim_func == "l2_norm":
-        return "L2 Norm"
+        return "Cosine similarity"
+    elif sim_func == "l2_dist":
+        return "Euclidean distance"
     else:
         raise ValueError(
-            f"Unknown similarity function: {sim_func}. Must be 'cos_sim' or 'l2_norm'"
+            f"Unknown similarity function: {sim_func}. Must be 'cos_sim' or 'l2_dist'"
         )
 
 
@@ -75,32 +75,13 @@ def get_class_name(class_num: int, per_class: bool) -> str:
     return REVERSE_LABEL_MAP[class_num]
 
 
-def get_similarity_range(sims, sim_func) -> tuple[float, float]:
-    match sim_func:
-        case "cos_sim":
-            # If using cosine similarity, set the range to (0, 1)
-            vmin: float = 0.0
-            vmax: float = 1.0
-        case "l2_norm":
-            # If using l2 norm, automatically calculate the range
-            vmin = min(
-                (
-                    val
-                    for d1 in sims.values()
-                    for d2 in d1.values()
-                    for val in d2.values()
-                )
-            )
-            vmax = max(
-                (
-                    val
-                    for d1 in sims.values()
-                    for d2 in d1.values()
-                    for val in d2.values()
-                )
-            )
-        case _:
-            raise ValueError(f"Unknown value for sim_func: {sim_func}")
+def get_similarity_range(sims) -> tuple[float, float]:
+    vmin = min(
+        (val for d1 in sims.values() for d2 in d1.values() for val in d2.values())
+    )
+    vmax = max(
+        (val for d1 in sims.values() for d2 in d1.values() for val in d2.values())
+    )
 
     return vmin, vmax
 
@@ -320,7 +301,7 @@ def plot_sim_over_the_layers(
         sims: Dictionary mapping layer number to dict of class numbers to dict of language pairs and their similarities
         language_pairs: List of tuples containing (source_lang, target_lang) pairs
         per_class: Whether per-class mode is enabled
-        sim_func: Similarity function type ("cos_sim" or "l2_norm")
+        sim_func: Similarity function type ("cos_sim" or "l2_dist")
     """
     n_pairs: int = len(language_pairs)
     n_cols: int = min(3, n_pairs)  # Use up to 3 columns
@@ -397,6 +378,114 @@ def plot_sim_over_the_layers(
 
     if show:
         plt.show()
+
+    plt.close()
+
+
+def calculate_between_layers_sims(
+    model_name: str,
+    probing_task: str,
+    language: str,
+    per_class: bool,
+    sim_func: str = "cos_sim",
+) -> dict[int, dict[str, float]]:
+    """
+    Calculate similarities between probes at each pair of layers for a single language.
+    Returns: {class_num: {f"{layer_a},{layer_b}": similarity}}
+    """
+    num_layers: int = get_number_of_layers_from_file(model_name)
+
+    probes: dict[int, LRProbe] = {
+        layer_num: load_probe(language, layer_num, probing_task, "lr", model_name)
+        for layer_num in range(num_layers)
+    }
+
+    sims: dict[int, dict[str, float]] = {}
+
+    for layer_a in range(num_layers):
+        for layer_b in range(num_layers):
+            if layer_a == layer_b:
+                continue
+            sim_method = get_similarity_function(probes[layer_a], sim_func)
+            sims_dict: dict[int, float] = sim_method(
+                probes[layer_b], per_class=per_class
+            )
+            for class_num, value in sims_dict.items():
+                if class_num not in sims:
+                    sims[class_num] = {}
+                sims[class_num][f"{layer_a},{layer_b}"] = value
+
+    return sims
+
+
+def plot_between_layers_confusion_matrix(
+    sims: dict[int, dict[str, float]],
+    title: str,
+    save: bool,
+    show: bool,
+    per_class: bool,
+    sim_func: str,
+    vmin: float = 0.0,
+    vmax: float = 1.0,
+) -> None:
+    class_nums = sorted(sims.keys())
+    num_classes = len(class_nums)
+
+    fig, axes = plt.subplots(1, num_classes, figsize=(7 * num_classes, 6))
+    if num_classes == 1:
+        axes = [axes]
+
+    for idx, class_num in enumerate(class_nums):
+        sims_for_class = sims[class_num]
+
+        layers = sorted(
+            set(int(k.split(",")[0]) for k in sims_for_class)
+            | set(int(k.split(",")[1]) for k in sims_for_class)
+        )
+        layer_to_idx = {layer: i for i, layer in enumerate(layers)}
+        n = len(layers)
+        matrix = np.ones((n, n))
+
+        for pair_key, value in sims_for_class.items():
+            layer_a, layer_b = pair_key.split(",")
+            matrix[layer_to_idx[int(layer_a)], layer_to_idx[int(layer_b)]] = value
+
+        ax = axes[idx]
+        metric_name = get_similarity_metric_name(sim_func)
+        layer_labels = [str(layer) for layer in layers]
+        has_negatives = vmin < 0.0
+        heatmap_kwargs: dict = dict(
+            xticklabels=layer_labels,  # type: ignore
+            yticklabels=layer_labels,  # type: ignore
+            annot=False,
+            cbar_kws={"label": metric_name},
+            vmin=vmin,
+            vmax=vmax,
+            ax=ax,
+        )
+        if has_negatives:
+            heatmap_kwargs["cmap"] = "RdBu"
+            heatmap_kwargs["center"] = 0.0
+        else:
+            heatmap_kwargs["cmap"] = "Blues"
+        sns.heatmap(matrix, **heatmap_kwargs)
+        class_name = get_class_name(class_num, per_class)
+        ax.set_title(f"{class_name.capitalize()}")  # type: ignore
+        ax.set_xlabel("Layer B")  # type: ignore
+        ax.set_ylabel("Layer A")  # type: ignore
+
+    fig.suptitle(title, fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    if save:
+        filename = title.replace(" ", "_").replace("/", "_") + ".png"
+        filepath = os.path.join(PLOTS_FOLDER, filename)
+        plt.savefig(filepath, dpi=100, bbox_inches="tight")
+
+    if show:
+        plt.show()
+
+    plt.close()
 
 
 def plot_sim_over_extra_iters(
@@ -477,6 +566,8 @@ def plot_sim_over_extra_iters(
     if show:
         plt.show()
 
+    plt.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -496,7 +587,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-e",
-        help="enter the experiment to perform: per_layer or per_extra_iter",
+        help="enter the experiment to perform: per_layer, per_extra_iter, or between_layers",
         default="per_extra_iter",
     )
 
@@ -534,9 +625,9 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-sf",
-        help="similarity function to use: cos_sim or l2_norm",
+        help="similarity function to use: cos_sim or l2_dist",
         default="cos_sim",
-        choices=["cos_sim", "l2_norm"],
+        choices=["cos_sim", "l2_dist"],
     )
 
     args: argparse.Namespace = parser.parse_args()
@@ -587,9 +678,23 @@ if __name__ == "__main__":
 
                     print(sims)
 
-                    metric_name = get_similarity_metric_name(sim_func)
+                    metric_name: str = get_similarity_metric_name(sim_func)
 
-                    vmin, vmax = get_similarity_range(sims, sim_func)
+                    if sim_func == "cos_sim":
+                        vmin, vmax = 0.0, 1.0
+                    elif sim_func == "l2_dist":
+                        vmin, vmax = get_similarity_range(sims)
+                    else:
+                        raise ValueError(f"Unknown sim_func ({sim_func})")
+
+                    for value in [
+                        val
+                        for d1 in sims.values()
+                        for d2 in d1.values()
+                        for val in d2.values()
+                    ]:
+                        if value < 0.0:
+                            print(f"Found negative similarity: {value}")
 
                     for layer_num in list(sims.keys())[::10]:
                         plot_sim_confusion_matrix(
@@ -616,7 +721,7 @@ if __name__ == "__main__":
                         vmax=vmax,
                     )
     elif experiment_type == "per_extra_iter":
-        num_refits = 5
+        num_refits = 3
         iterations_per_refit = 1
         for model_name in model_names:
             for probing_task in probing_tasks:
@@ -640,7 +745,24 @@ if __name__ == "__main__":
 
                     # print(sims)
 
-                    vmin, vmax = get_similarity_range(sims, sim_func)
+                    # print(sims)
+
+                    if sim_func == "cos_sim":
+                        # vmin, vmax = 0.99, 1.01
+                        vmin, vmax = get_similarity_range(sims)
+                    elif sim_func == "l2_dist":
+                        vmin, vmax = get_similarity_range(sims)
+                    else:
+                        raise ValueError(f"Unknown sim_func ({sim_func})")
+
+                    for value in [
+                        val
+                        for d1 in sims.values()
+                        for d2 in d1.values()
+                        for val in d2.values()
+                    ]:
+                        if value < 0.0:
+                            print(f"Found negative similarity: {value}")
 
                     metric_name = get_similarity_metric_name(sim_func)
                     layer_nums_to_plot: list[int] = list(sims.keys())[::4]
@@ -655,8 +777,45 @@ if __name__ == "__main__":
                         vmin=vmin,
                         vmax=vmax,
                     )
+    elif experiment_type == "between_layers":
+        for model_name in model_names:
+            for language in languages:
+                for probing_task in probing_tasks:
+                    sims_between: dict[int, dict[str, float]] = (
+                        calculate_between_layers_sims(
+                            model_name,
+                            probing_task,
+                            language,
+                            per_class,
+                            sim_func,
+                        )
+                    )
 
+                    metric_name = get_similarity_metric_name(sim_func)
+
+                    all_values: list[float] = [
+                        v for d in sims_between.values() for v in d.values()
+                    ]
+                    if sim_func == "cos_sim":
+                        vmin, vmax = -0.15, 1.0
+                    else:
+                        vmin, vmax = float(min(all_values)), float(max(all_values))
+
+                    for value in all_values:
+                        if value < 0.0:
+                            print(f"Found negative similarity: {value}")
+
+                    plot_between_layers_confusion_matrix(
+                        sims_between,
+                        f"{metric_name} between layers for {model_name} {language} {probing_task} probes with per_class={per_class}",
+                        save,
+                        show,
+                        per_class,
+                        sim_func,
+                        vmin=vmin,
+                        vmax=vmax,
+                    )
     else:
         raise ValueError(
-            f"{experiment_type} invalid. exp must be either per_layer or per_extra_iter."
+            f"{experiment_type} invalid. exp must be per_layer, per_extra_iter, or between_layers."
         )

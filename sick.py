@@ -4,6 +4,7 @@ import random
 import csv
 
 from utils import (
+    SICK_DIRTY_NL_FILE,
     SICK_FOLDER,
     SICK_DIRTY_FOLDERS,
     SICK_DIRTY_EN_FILE,
@@ -25,6 +26,7 @@ class SICKDirtyDataset(Dataset):
         self.original_ids: list[int] = []
 
         self.language: str = language
+        self.split: str = split
 
         self._load_dirty_dataset(split)
 
@@ -111,6 +113,31 @@ class SICKDirtyDataset(Dataset):
                         )
                         self.labels.append(LABEL_MAP[row["entailment_label_Ja"]])
                         self.original_ids.append(int(row["pair_ID"]))
+            case "nl":
+                filepath: str = (
+                    f"./{SICK_FOLDER}/{SICK_DIRTY_FOLDERS['nl']}/{SICK_DIRTY_NL_FILE}"
+                )
+
+                with open(filepath, "r", encoding="utf-8") as f:
+                    next(f)  # Skip first line, since it is the column names
+                    for line in f:
+                        line: str = line.strip()
+                        if not line:  # Skip empty lines
+                            continue
+
+                        data: list[str] = [s.strip() for s in line.split("\t")]
+
+                        if data[-1].lower() != original_split:
+                            continue
+
+                        pair_ID = int(data[0])
+                        sentence_A: str = data[1]
+                        sentence_B: str = data[2]
+                        label: str = data[3].lower()
+
+                        self.sentence_pairs.append((sentence_A, sentence_B))
+                        self.labels.append(LABEL_MAP[label])
+                        self.original_ids.append(pair_ID)
 
     def __getitem__(self, i: int) -> tuple[tuple[str, str], int, int]:
         return self.sentence_pairs[i], self.labels[i], self.original_ids[i]
@@ -120,28 +147,31 @@ class SICKDirtyDataset(Dataset):
 
 
 class SICKMergedDataset(Dataset):
-    def __init__(self, language, split) -> None:
+    def __init__(self, language: str, split: str) -> None:
         self.sentence_pairs: list[tuple[str, str]] = []
         self.labels: list[dict[str, int]] = []
         self.original_ids: list[int] = []
 
-        self.load_dataset(language, split)
+        self.language: str = language
+        self.split: str = split
 
-    def load_dataset(self, language: str, split: str) -> None:
+        self.load_dataset()
+
+    def load_dataset(self) -> None:
         with open(MERGED_SICK_FILEPATH, "r", encoding="utf-8") as file:
             merged_dataset_dict: dict[str, dict[str, str | int]] = json.load(file)
 
         for id, values in merged_dataset_dict.items():
-            if values["split"] == split:
+            if values["split"] == self.split:
                 self.sentence_pairs.append(
                     (
-                        str(values[f"sentence_a_{language}"]),
-                        str(values[f"sentence_b_{language}"]),
+                        str(values[f"sentence_a_{self.language}"]),
+                        str(values[f"sentence_b_{self.language}"]),
                     )
                 )
 
                 # Japanese uses slightly different labels
-                if language == "jp":
+                if self.language == "jp":
                     standard_label_key = "standard_japanese_label"
                 else:
                     standard_label_key = "standard_label"

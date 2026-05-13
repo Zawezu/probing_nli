@@ -16,6 +16,11 @@ LABEL_ACCEPTED_VERSIONS: dict[str, dict[str, list[str]]] = {
     },
     "es": {"neutral": ["neutr"], "entailment": ["impli"], "contradiction": ["contrad"]},
     "jp": {"neutral": ["中立"], "entailment": ["含意"], "contradiction": ["矛盾"]},
+    "nl": {
+        "neutral": ["neutr"],
+        "entailment": ["impli"],
+        "contradiction": ["tegenstr", "contrad"],
+    },
 }
 
 experiment_number = 3
@@ -138,16 +143,16 @@ def run_full_experiment(
     test_sick_dataset: SICKMergedDataset = SICKMergedDataset(language, "test")
 
     train_labels: list[int] = train_sick_dataset.get_labels()
-    print(train_labels[:10])
+    print(train_labels[:10], len(train_labels))
 
     train_preds: list[int] = train_response_dataset.get_labels()
-    print(train_preds[:10])
+    print(train_preds[:10], len(train_preds))
 
     test_labels: list[int] = test_sick_dataset.get_labels()
-    print(test_labels[:10])
+    print(test_labels[:10], len(test_labels))
 
     test_preds: list[int] = test_response_dataset.get_labels()
-    print(test_preds[:10])
+    print(test_preds[:10], len(test_preds))
 
     # Save confusion matrix of train predictions
     # Specify labels to ensure a 4x4 matrix for all possible labels: -1 (unknown), 0, 1, 2
