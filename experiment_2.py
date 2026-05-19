@@ -83,9 +83,8 @@ def run_full_experiment_2(
             probing_task,
             probe_type,
             model_name,
-            activation_dataset_train_a,
-            force_probe_creation,
-            device,
+            activation_dataset_train=activation_dataset_train_a,
+            force_probe_creation=force_probe_creation,
         )
 
         # Load labels for this layer (not necessary in theory, but done just in case the layer activations somehow got misaligned)

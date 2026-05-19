@@ -65,8 +65,8 @@ def run_full_experiment_1(
             probing_task,
             probe_type,
             model_name,
-            activation_dataset_train,
-            force_probe_creation,
+            activation_dataset_train=activation_dataset_train,
+            force_probe_creation=force_probe_creation,
         )
 
         # Get train predictions for generating the metrics

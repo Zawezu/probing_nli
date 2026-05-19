@@ -138,6 +138,8 @@ class ExperimentResult:
             per_class_precision: dict[str, float] = {}
             per_class_f1: dict[str, float] = {}
 
+            supported_class_ids: list[str] = []
+
             for class_idx in range(num_classes):
                 # Use the actual label value as the key
                 label_value = label_values[class_idx]
@@ -166,6 +168,11 @@ class ExperimentResult:
                     f1: float = 2 * (precision * recall) / (precision + recall)
                 per_class_f1[class_id] = float(f1)
 
+                # Only include classes that have actual support in the macro average
+                # This makes it so that the unkown class does not affect the metrics when there are no unknown labels
+                if row_sum > 0 or col_sum > 0:
+                    supported_class_ids.append(class_id)
+
             # Store per-class metrics
             self.append_metric(
                 split, f"per_class_precision{metric_suffix}", per_class_precision
@@ -175,19 +182,21 @@ class ExperimentResult:
             )
             self.append_metric(split, f"per_class_f1{metric_suffix}", per_class_f1)
 
-            # Overall metrics (macro average)
+            # Overall metrics (macro average over supported classes only)
             self.append_metric(
                 split,
                 f"precision{metric_suffix}",
-                float(np.mean(list(per_class_precision.values()))),
+                float(np.mean([per_class_precision[c] for c in supported_class_ids])),
             )
             self.append_metric(
                 split,
                 f"recall{metric_suffix}",
-                float(np.mean(list(per_class_recall.values()))),
+                float(np.mean([per_class_recall[c] for c in supported_class_ids])),
             )
             self.append_metric(
-                split, f"f1{metric_suffix}", float(np.mean(list(per_class_f1.values())))
+                split,
+                f"f1{metric_suffix}",
+                float(np.mean([per_class_f1[c] for c in supported_class_ids])),
             )
 
     def add_marginal_metrics(self, control_exp_result: "ExperimentResult") -> None:

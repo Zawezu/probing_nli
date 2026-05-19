@@ -9,7 +9,7 @@ import pickle
 import json
 import numpy as np
 
-from utils import PROBES_FOLDER, HYPERPARAMETERS_FILEPATH
+from utils import PROBES_FOLDER
 
 # Ignore convergence warnings
 from sklearn.exceptions import ConvergenceWarning
@@ -324,7 +324,7 @@ def get_probe(
     model_name: str,
     activation_dataset_train=None,
     force_probe_creation: bool = False,
-    hyperparameters_file: str = HYPERPARAMETERS_FILEPATH,
+    hyperparameters_file: str | None = None,
 ) -> LRProbe:
     if (not force_probe_creation) and (
         probe_exists(language, layer_num, probing_task, probe_type, model_name)
@@ -347,11 +347,16 @@ def get_probe(
                         "activation_dataset_train must be specified in order to create a probe"
                     )
 
-                hyperparams: dict = load_hyperparameters(
-                    model_name, language, layer_num, hyperparameters_file
-                )
-                C: float = hyperparams.get("C", 0.1)
-                fit_intercept = hyperparams.get("fit_intercept", False)
+                # For default we turn off the hyperparameters. This is because if the probe at each layer or language has different hyperparameters,
+                # it messes up with the cosine similarity comparisons due to the probes working in fundamentally different ways
+                if hyperparameters_file is None:
+                    hyperparams = {"C": 0.01, "fit_intercept": True}
+                else:
+                    hyperparams: dict = load_hyperparameters(
+                        model_name, language, layer_num, hyperparameters_file
+                    )
+                C: float = hyperparams["C"]
+                fit_intercept = hyperparams["fit_intercept"]
                 probe: LRProbe = LRProbe.create_from_data(
                     activation_dataset_train, C, fit_intercept
                 )
