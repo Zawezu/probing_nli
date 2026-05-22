@@ -48,23 +48,11 @@
 #     ).to(device)  # type: ignore
 
 #     run_nli_inference()
-import pickle
-from utils import LANGUAGES, MODEL_NAMES
 
-for language in LANGUAGES:
-    for model_name in MODEL_NAMES:
-        result = pickle.load(
-            open(
-                f"./data/experiment_results/experiment_1/{language},standard,lr,{model_name}.pkl",
-                "rb",
-            )
-        )
-        print("idxs_per_cm_cell" in result.metrics["test"].keys())
 
-        result = pickle.load(
-            open(
-                f"./data/experiment_results/experiment_1/{language},control,lr,{model_name}.pkl",
-                "rb",
-            )
-        )
-        print("idxs_per_cm_cell" in result.metrics["test"].keys())
+on = False
+
+if on:
+    var = 0
+
+print(var)

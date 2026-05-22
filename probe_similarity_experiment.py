@@ -172,7 +172,7 @@ def calculate_per_layer_sims_over_extra_iters(
             language_pair[0], layer_num, probing_task, "lr", model_name, 0
         )
 
-        for refit_num in range(1, num_refits):
+        for refit_num in range(1, num_refits + 1):
             extra_iters: int = refit_num * iterations_per_refit
 
             # Get probe refitted on language b for a certain number of extra iterations
@@ -721,8 +721,8 @@ if __name__ == "__main__":
                         vmax=vmax,
                     )
     elif experiment_type == "per_extra_iter":
-        num_refits = 3
-        iterations_per_refit = 1
+        num_refits = 2
+        iterations_per_refit = 1000
         for model_name in model_names:
             for probing_task in probing_tasks:
                 language_pairs: list[tuple[str, str]] = get_language_pair_permutations(

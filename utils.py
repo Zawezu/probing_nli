@@ -119,6 +119,12 @@ FEW_SHOT_EXAMPLES = {
     ),
 }
 
+# Significance results constants
+
+SIGNIFICANCE_RESULTS_FOLDER = "./data/significance_results"
+
+# Miscellaneous functions
+
 
 def get_number_of_layers_from_file(model_name) -> int:
     with open(get_n_layers_txt_filepath(model_name), "r") as file:
