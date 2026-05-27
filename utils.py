@@ -64,6 +64,11 @@ EXPERIMENT_RESULTS_FOLDER = "./data/experiment_results"
 PLOTS_FOLDER = "./plots"
 PROBES_FOLDER = "./data/probes"
 
+PROBE_TYPE_SUBFOLDERS: dict[str, str] = {
+    "lr": "logistic_regression",
+    "mm": "mass_mean",
+}
+
 PROBING_TASKS: list[str] = ["standard", "control", "disjunct_control"]
 
 # Hyperparameter constants

@@ -1,13 +1,21 @@
 from typing import Literal
 from torch import Tensor
 
+import argparse
 import torch as t
 from sklearn.metrics import confusion_matrix
 
 from activations import ActivationDataset
-from probes import LRProbe, get_probe, save_probe, probe_exists, load_probe
+from probes import get_probe, save_probe, probe_exists, load_probe
 from experiment_common_code import ExperimentResult
-from utils import LABEL_MAP, get_language_merged_string, get_number_of_layers_from_file
+from utils import (
+    LABEL_MAP,
+    LANGUAGES,
+    MODEL_NAMES,
+    get_language_merged_string,
+    get_language_pair_permutations,
+    get_number_of_layers_from_file,
+)
 
 experiment_number = 2
 
@@ -77,7 +85,7 @@ def run_full_experiment_2(
         )
 
         # We get the appropiate probe for this layer (pretrained on language a)
-        probe: LRProbe = get_probe(
+        probe = get_probe(
             language_a,
             layer_num,
             probing_task,
@@ -263,3 +271,60 @@ def run_experiment_2(
             print(f"Saved result to {filepath}")
 
     return exp_results
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m", help="model names", nargs="*", default=MODEL_NAMES)
+    parser.add_argument(
+        "-l",
+        help="languages (language_pairs are derived from these)",
+        nargs="*",
+        default=LANGUAGES,
+    )
+    parser.add_argument("-pt", help="probe type", default="lr")
+    parser.add_argument(
+        "-nl", help="number of layers (None = all)", type=int, default=None
+    )
+    parser.add_argument("-nr", help="number of refits", type=int, default=3)
+    parser.add_argument("-ir", help="iterations per refit", type=int, default=1000)
+    parser.add_argument(
+        "-f",
+        help="force probe creation even if a saved probe exists",
+        nargs="?",
+        default="False",
+        const="True",
+    )
+    parser.add_argument(
+        "-sr",
+        help="whether to save results",
+        nargs="?",
+        default="True",
+        const="True",
+    )
+
+    args: argparse.Namespace = parser.parse_args()
+    print(args)
+
+    model_names: list[str] = args.m
+    languages: list[str] = args.l
+    language_pairs: list[tuple[str, str]] = get_language_pair_permutations(languages)
+    probe_type: str = args.pt
+    num_layers: int | None = args.nl
+    num_refits: int = args.nr
+    iterations_per_refit: int = args.ir
+    force_probe_creation: bool = args.f.lower() == "true"
+    save_results: bool = args.sr.lower() == "true"
+
+    run_experiment_2(
+        language_pairs,
+        "standard",
+        "control",
+        probe_type,
+        model_names,
+        num_refits=num_refits,
+        iterations_per_refit=iterations_per_refit,
+        force_probe_creation=force_probe_creation,
+        num_layers=num_layers,
+        save_results=save_results,
+    )

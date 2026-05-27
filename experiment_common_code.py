@@ -489,20 +489,59 @@ def show_plots(
         class_ids = [""]
 
     # Validate that specified characteristics are valid
-    valid_characteristics: list[str] = [
+    all_valid_characteristics: set[str] = {
         "model_name",
         "split",
         "class_name",
         "language",
+        "language_a",
+        "language_b",
         "probing_task",
         "extra_iter_num",
-    ]
+    }
 
     for char in separate_chars_within_plot:
-        if char not in valid_characteristics:
+        if char not in all_valid_characteristics:
             raise ValueError(
-                f"Invalid characteristic: {char}. Must be one of {valid_characteristics}"
+                f"Invalid characteristic: {char}. Must be one of {sorted(all_valid_characteristics)}"
             )
+
+    # At most one language-related characteristic is allowed at a time
+    language_chars_in_separate = [
+        c
+        for c in separate_chars_within_plot
+        if c in {"language", "language_a", "language_b"}
+    ]
+    if len(language_chars_in_separate) > 1:
+        raise ValueError(
+            f"separate_chars_within_plot can contain at most one of 'language', 'language_a', "
+            f"'language_b', got: {language_chars_in_separate}"
+        )
+
+    # When language_a or language_b is used, language pairs are split into components
+    use_language_split: bool = any(
+        c in separate_chars_within_plot for c in ("language_a", "language_b")
+    )
+
+    if use_language_split:
+        valid_characteristics: list[str] = [
+            "model_name",
+            "split",
+            "class_name",
+            "language_a",
+            "language_b",
+            "probing_task",
+            "extra_iter_num",
+        ]
+    else:
+        valid_characteristics = [
+            "model_name",
+            "split",
+            "class_name",
+            "language",
+            "probing_task",
+            "extra_iter_num",
+        ]
 
     separate_chars_outside_plot: list[str] = [
         c for c in valid_characteristics if c not in separate_chars_within_plot
@@ -518,17 +557,22 @@ def show_plots(
         else:
             class_name = class_id
 
-        all_combinations.append(
-            {
-                "model_name": model_name,
-                "split": split,
-                "class_id": class_id,
-                "class_name": class_name,
-                "language": language,
-                "probing_task": probing_task,
-                "extra_iter_num": extra_iter_num,
-            }
-        )
+        combo: dict[str, Any] = {
+            "model_name": model_name,
+            "split": split,
+            "class_id": class_id,
+            "class_name": class_name,
+            "language": language,
+            "probing_task": probing_task,
+            "extra_iter_num": extra_iter_num,
+        }
+
+        if use_language_split:
+            lang_parts = language.split("→", 1)
+            combo["language_a"] = lang_parts[0]
+            combo["language_b"] = lang_parts[1] if len(lang_parts) > 1 else ""
+
+        all_combinations.append(combo)
 
     # Group combinations by the specified characteristics to define each plot
     plots_dict: dict[tuple, list[dict]] = defaultdict(list)
@@ -795,7 +839,7 @@ def plot_metrics_by_group(
         ax.set_xlabel(xlabel)
         ax.set_ylabel(metric.replace("_", " "))
         ax.grid(True, alpha=0.3)
-        ax.legend(loc=legend_position)
+        ax.legend(loc=legend_position, fontsize=3)
         ax.set_ylim(y_axis_range)
 
     # Hide unused subplots

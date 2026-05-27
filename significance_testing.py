@@ -762,7 +762,7 @@ def run_tests_between_language_pairs(
 ) -> dict[tuple[tuple[str, str], tuple[str, str]], list[dict[str, Any]]]:
     """
     For every combination of two experiment-2 language pairs, compare the probes.
-    One test is run per pair-of-pairs.
+    One test is run per pair of pairs.
     """
     all_results: dict[
         tuple[tuple[str, str], tuple[str, str]], list[dict[str, Any]]

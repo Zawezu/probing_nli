@@ -2,13 +2,14 @@
 from typing import Literal
 from torch import Tensor
 
+import argparse
 import torch as t
 from sklearn.metrics import confusion_matrix
 
 from activations import ActivationDataset, get_number_of_layers_from_file
 from probes import get_probe
 from experiment_common_code import ExperimentResult
-from utils import LABEL_MAP
+from utils import LABEL_MAP, LANGUAGES, MODEL_NAMES
 
 experiment_number = 1
 
@@ -156,3 +157,48 @@ def run_experiment_1(
             print(f"Saved result to {filepath}")
 
     return exp_results
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m", help="model names", nargs="*", default=MODEL_NAMES)
+    parser.add_argument("-l", help="languages", nargs="*", default=LANGUAGES)
+    parser.add_argument("-pt", help="probe type", default="lr")
+    parser.add_argument(
+        "-nl", help="number of layers (None = all)", type=int, default=None
+    )
+    parser.add_argument(
+        "-f",
+        help="force probe creation even if a saved probe exists",
+        nargs="?",
+        default="False",
+        const="True",
+    )
+    parser.add_argument(
+        "-sr",
+        help="whether to save results",
+        nargs="?",
+        default="True",
+        const="True",
+    )
+
+    args: argparse.Namespace = parser.parse_args()
+    print(args)
+
+    model_names: list[str] = args.m
+    languages: list[str] = args.l
+    probe_type: str = args.pt
+    num_layers: int | None = args.nl
+    force_probe_creation: bool = args.f.lower() == "true"
+    save_results: bool = args.sr.lower() == "true"
+
+    run_experiment_1(
+        languages,
+        "standard",
+        "control",
+        probe_type,
+        model_names,
+        force_probe_creation,
+        num_layers=num_layers,
+        save_results=save_results,
+    )
