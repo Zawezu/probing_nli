@@ -36,6 +36,8 @@ class ExperimentResult:
         probe_type: str,
         model_name: str,
         extra_iter_num: int = 0,
+        zeroed_out_activation_dims: int = 0,
+        zeroed_out_weight_dims: int = 0,
     ) -> None:
         self.experiment_number: int = experiment_number
         self.language: str = language
@@ -43,6 +45,8 @@ class ExperimentResult:
         self.probe_type: str = probe_type
         self.model_name: str = model_name
         self.extra_iter_num: int = extra_iter_num
+        self.zeroed_out_activation_dims: int = zeroed_out_activation_dims
+        self.zeroed_out_weight_dims: int = zeroed_out_weight_dims
 
         match experiment_number:
             case 1 | 3:
@@ -394,6 +398,8 @@ class ExperimentResult:
             self.probe_type,
             self.model_name,
             self.extra_iter_num,
+            self.zeroed_out_activation_dims,
+            self.zeroed_out_weight_dims,
         )
         with open(filepath, "wb") as f:
             pickle.dump(self, f)
@@ -419,12 +425,21 @@ class ExperimentResult:
         probe_type: str,
         model_name: str,
         extra_iter_num: int,
+        zeroed_out_activation_dims: int = 0,
+        zeroed_out_weight_dims: int = 0,
     ) -> str:
         """Generate filename based on experiment parameters."""
+        base = f"{language},{probing_task},{probe_type},{model_name}"
+        suffixes = []
         if extra_iter_num:
-            return f"{language},{probing_task},{probe_type},{model_name},{extra_iter_num}_extra_iters.pkl"
-        else:
-            return f"{language},{probing_task},{probe_type},{model_name}.pkl"
+            suffixes.append(f"{extra_iter_num}_extra_iters")
+        if zeroed_out_activation_dims:
+            suffixes.append(f"{zeroed_out_activation_dims}_zeroed_act_dims")
+        if zeroed_out_weight_dims:
+            suffixes.append(f"{zeroed_out_weight_dims}_zeroed_wt_dims")
+        if suffixes:
+            return f"{base},{','.join(suffixes)}.pkl"
+        return f"{base}.pkl"
 
     @staticmethod
     def get_from_file(
@@ -434,17 +449,16 @@ class ExperimentResult:
         probe_type: str,
         model_name: str,
         extra_iter_num: int = 0,
+        zeroed_out_activation_dims: int = 0,
+        zeroed_out_weight_dims: int = 0,
     ) -> "ExperimentResult":
         """
         Load an ExperimentResult from a pickle file.
 
-        Args:
-            filepath: Path to the pickle file
-
         Returns:
             The loaded ExperimentResult object
         """
-        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num)}"
+        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num, zeroed_out_activation_dims, zeroed_out_weight_dims)}"
         with open(filepath, "rb") as f:
             return pickle.load(f)
 
@@ -464,6 +478,8 @@ def show_plots(
     save: bool = False,
     filename: str = "",
     legend_position="upper left",
+    zeroed_out_activation_dims_list: list[int] = [0],
+    zeroed_out_weight_dims_list: list[int] = [0],
 ) -> None:
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
@@ -498,6 +514,8 @@ def show_plots(
         "language_b",
         "probing_task",
         "extra_iter_num",
+        "zeroed_out_activation_dims",
+        "zeroed_out_weight_dims",
     }
 
     for char in separate_chars_within_plot:
@@ -532,6 +550,8 @@ def show_plots(
             "language_b",
             "probing_task",
             "extra_iter_num",
+            "zeroed_out_activation_dims",
+            "zeroed_out_weight_dims",
         ]
     else:
         valid_characteristics = [
@@ -541,6 +561,8 @@ def show_plots(
             "language",
             "probing_task",
             "extra_iter_num",
+            "zeroed_out_activation_dims",
+            "zeroed_out_weight_dims",
         ]
 
     separate_chars_outside_plot: list[str] = [
@@ -549,8 +571,24 @@ def show_plots(
 
     # Generate all combinations of all characteristics
     all_combinations: list[dict[str, Any]] = []
-    for model_name, split, class_id, language, probing_task, extra_iter_num in product(
-        model_names, splits, class_ids, languages, probing_tasks, extra_iter_nums
+    for (
+        model_name,
+        split,
+        class_id,
+        language,
+        probing_task,
+        extra_iter_num,
+        zeroed_out_activation_dims,
+        zeroed_out_weight_dims,
+    ) in product(
+        model_names,
+        splits,
+        class_ids,
+        languages,
+        probing_tasks,
+        extra_iter_nums,
+        zeroed_out_activation_dims_list,
+        zeroed_out_weight_dims_list,
     ):
         if class_id in extended_class_names.keys():
             class_name: str = extended_class_names[class_id]
@@ -565,6 +603,8 @@ def show_plots(
             "language": language,
             "probing_task": probing_task,
             "extra_iter_num": extra_iter_num,
+            "zeroed_out_activation_dims": zeroed_out_activation_dims,
+            "zeroed_out_weight_dims": zeroed_out_weight_dims,
         }
 
         if use_language_split:
@@ -589,6 +629,8 @@ def show_plots(
             probe_type,
             combo["model_name"],
             combo["extra_iter_num"],
+            combo["zeroed_out_activation_dims"],
+            combo["zeroed_out_weight_dims"],
         )
 
         # Create plot request
@@ -599,9 +641,9 @@ def show_plots(
             "class_name": combo["class_name"],
         }
 
-        print(
-            f"Created line request:\n{[f'{key}: {str(value)}' for key, value in line_request.items()]}"
-        )
+        # print(
+        #     f"Created line request:\n{[f'{key}: {str(value)}' for key, value in line_request.items()]}"
+        # )
 
         plots_dict[key].append(line_request)
 
@@ -619,6 +661,18 @@ def show_plots(
     )
 
 
+OKABE_ITO_PALETTE: list[str] = [
+    "#E69F00",
+    "#56B4E9",
+    "#009E73",
+    "#F0E442",
+    "#0072B2",
+    "#D55E00",
+    "#CC79A7",
+    "#000000",
+]
+
+
 def plot_metrics_by_group(
     plots_to_make: list[list[dict]],
     metric: str,
@@ -629,6 +683,7 @@ def plot_metrics_by_group(
     legend_position,
     xlabel: str = "Layer",
     scale: int = 1,
+    sort_lines: bool = False,
 ) -> None:
     """
     Plot metrics grouped by experiment groups.
@@ -674,7 +729,7 @@ def plot_metrics_by_group(
                 class_name: str = line_request["class_name"]
                 # results_for_determining_axis: list[float | list[float]] = exp_result.metrics[split][metric]
                 if class_name != "all":
-                    print(exp_result.metrics[split][metric])
+                    # print(exp_result.metrics[split][metric])
                     results_for_determining_axis: list[float] = exp_result.get_metric(
                         split, metric, layer_num=None, cls=class_id
                     )
@@ -703,6 +758,8 @@ def plot_metrics_by_group(
         "probe_type",
         "model_name",
         "extra_iter_num",
+        "zeroed_out_activation_dims",
+        "zeroed_out_weight_dims",
         "split",
         "metric",
     ]
@@ -726,6 +783,12 @@ def plot_metrics_by_group(
                 "probe_type": exp_result.probe_type,
                 "model_name": exp_result.model_name,
                 "extra_iter_num": str(exp_result.extra_iter_num),
+                "zeroed_out_activation_dims": str(
+                    getattr(exp_result, "zeroed_out_activation_dims", 0)
+                ),
+                "zeroed_out_weight_dims": str(
+                    getattr(exp_result, "zeroed_out_weight_dims", 0)
+                ),
                 "split": split,
                 "metric": metric,
                 "label": class_name,
@@ -794,7 +857,7 @@ def plot_metrics_by_group(
             if "per_class" in metric or "overlapping_idx_amounts" in metric:
                 # If we are dealing with a per-class metric, we add a plot for the requested label id
                 results_for_this_label: list[float] = [
-                    r.get(class_id, 0)
+                    r.get(class_id, 0)  # type: ignore
                     for r in results  # type: ignore
                 ]  # type: ignore
                 average_value: float = float(np.mean(results_for_this_label))
@@ -824,10 +887,10 @@ def plot_metrics_by_group(
                     }
                 )
 
-        # Sort lines by average value in descending order (higher values first)
-        lines_to_plot.sort(key=lambda x: x["average_value"], reverse=True)
+        if sort_lines:
+            lines_to_plot.sort(key=lambda x: x["average_value"], reverse=True)
 
-        # Plot each line in sorted order
+        ax.set_prop_cycle(color=OKABE_ITO_PALETTE)
         for line_data in lines_to_plot:
             ax.plot(
                 line_data["layers"],
@@ -839,7 +902,7 @@ def plot_metrics_by_group(
         ax.set_xlabel(xlabel)
         ax.set_ylabel(metric.replace("_", " "))
         ax.grid(True, alpha=0.3)
-        ax.legend(loc=legend_position, fontsize=3)
+        ax.legend(loc=legend_position, fontsize=7)
         ax.set_ylim(y_axis_range)
 
     # Hide unused subplots

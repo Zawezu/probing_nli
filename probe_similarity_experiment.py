@@ -109,6 +109,8 @@ def calculate_per_layer_sims_between_langs(
     sim_func: str = "cos_sim",
     extra_iters: int = 0,
     probe_type: str = "lr",
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
@@ -125,6 +127,8 @@ def calculate_per_layer_sims_between_langs(
                 probe_type,
                 model_name,
                 extra_iters=extra_iters,
+                zeroed_out_activation_dims=zeroed_out_activation_dims,
+                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
             probe_b: AnyProbe = load_probe(
                 language_b,
@@ -133,6 +137,8 @@ def calculate_per_layer_sims_between_langs(
                 probe_type,
                 model_name,
                 extra_iters=extra_iters,
+                zeroed_out_activation_dims=zeroed_out_activation_dims,
+                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
             sim_method = get_similarity_function(probe_a, sim_func)
@@ -163,6 +169,8 @@ def calculate_per_layer_sims_over_extra_iters(
     per_class: bool,
     sim_func: str = "cos_sim",
     probe_type: str = "lr",
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
@@ -175,7 +183,14 @@ def calculate_per_layer_sims_over_extra_iters(
 
         # Get original probe trained on language a
         original_probe: AnyProbe = load_probe(
-            language_pair[0], layer_num, probing_task, probe_type, model_name, 0
+            language_pair[0],
+            layer_num,
+            probing_task,
+            probe_type,
+            model_name,
+            0,
+            zeroed_out_activation_dims=zeroed_out_activation_dims,
+            zeroed_out_weight_dims=zeroed_out_weight_dims,
         )
 
         for refit_num in range(1, num_refits + 1):
@@ -189,6 +204,8 @@ def calculate_per_layer_sims_over_extra_iters(
                 probe_type,
                 model_name,
                 extra_iters,
+                zeroed_out_activation_dims=zeroed_out_activation_dims,
+                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
             sim_method = get_similarity_function(original_probe, sim_func)
@@ -227,6 +244,65 @@ def get_filepath(title) -> Path:
     filepath: Path = folder_path / clean_title
 
     return filepath
+
+
+def plot_probe_weight_magnitudes(
+    model_name: str,
+    language: str,
+    layer_num: int,
+    probing_task: str,
+    probe_type: str,
+    extra_iters: int = 0,
+    save: bool = False,
+    show: bool = True,
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
+) -> None:
+    probe: AnyProbe = load_probe(
+        language,
+        layer_num,
+        probing_task,
+        probe_type,
+        model_name,
+        extra_iters,
+        zeroed_out_activation_dims=zeroed_out_activation_dims,
+        zeroed_out_weight_dims=zeroed_out_weight_dims,
+    )
+
+    weights = probe.get_vector(per_class=True)  # shape (n_classes, n_features+1)
+    n_classes = weights.shape[0]
+
+    fig, axes = plt.subplots(1, n_classes, figsize=(6 * n_classes, 4), sharey=True)
+    if n_classes == 1:
+        axes = [axes]
+
+    for i, ax in enumerate(axes):
+        magnitudes = np.abs(weights[i])
+        ax.plot(magnitudes, linewidth=0.8)
+        ax.set_xlabel("Dimension")
+        ax.set_ylabel("|Weight|")
+        class_name = get_class_name(i, per_class=True)
+        ax.set_title(class_name.capitalize())
+        ax.grid(True, alpha=0.3)
+
+    title = f"Weight magnitudes of {probe_type} probe for {model_name} {language} layer {layer_num} {probing_task}"
+    if extra_iters:
+        title += f" ({extra_iters} extra iters)"
+    if zeroed_out_activation_dims:
+        title += f" zad={zeroed_out_activation_dims}"
+    if zeroed_out_weight_dims:
+        title += f" zwd={zeroed_out_weight_dims}"
+    fig.suptitle(title, fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    if save:
+        filepath: Path = get_filepath(title)
+        plt.savefig(filepath, dpi=100, bbox_inches="tight")
+
+    if show:
+        plt.show()
+
+    plt.close()
 
 
 def plot_sim_confusion_matrix(
@@ -413,6 +489,8 @@ def calculate_between_layers_sims(
     per_class: bool,
     sim_func: str = "cos_sim",
     probe_type: str = "lr",
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
 ) -> dict[int, dict[str, float]]:
     """
     Calculate similarities between probes at each pair of layers for a single language.
@@ -421,7 +499,15 @@ def calculate_between_layers_sims(
     num_layers: int = get_number_of_layers_from_file(model_name)
 
     probes: dict[int, AnyProbe] = {
-        layer_num: load_probe(language, layer_num, probing_task, probe_type, model_name)
+        layer_num: load_probe(
+            language,
+            layer_num,
+            probing_task,
+            probe_type,
+            model_name,
+            zeroed_out_activation_dims=zeroed_out_activation_dims,
+            zeroed_out_weight_dims=zeroed_out_weight_dims,
+        )
         for layer_num in range(num_layers)
     }
 
@@ -728,7 +814,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-e",
-        help="enter the experiment to perform: per_layer, per_layer_three_metrics, per_extra_iter, or between_layers",
+        help="enter the experiment to perform: per_layer, per_layer_three_metrics, per_extra_iter, between_layers, or weight_magnitudes",
         default="per_extra_iter",
     )
 
@@ -777,6 +863,18 @@ if __name__ == "__main__":
         default="lr",
         choices=["lr", "mm"],
     )
+    parser.add_argument(
+        "-zad",
+        help="number of highest-magnitude activation dims zeroed during probe training (0 = disabled)",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "-zwd",
+        help="number of highest-magnitude weight dims to zero out per class after loading (0 = disabled)",
+        type=int,
+        default=0,
+    )
 
     args: argparse.Namespace = parser.parse_args()
     print(args)
@@ -792,6 +890,14 @@ if __name__ == "__main__":
     per_class: bool = args.pc.lower() == "true"
     sim_func: str = args.sf
     probe_type: str = args.pt
+    zeroed_out_activation_dims: int = args.zad
+    zeroed_out_weight_dims: int = args.zwd
+
+    zeroing_suffix: str = ""
+    if zeroed_out_activation_dims:
+        zeroing_suffix += f" zad={zeroed_out_activation_dims}"
+    if zeroed_out_weight_dims:
+        zeroing_suffix += f" zwd={zeroed_out_weight_dims}"
 
     if extra_iter_nums != [0] and experiment_type not in (
         "per_layer",
@@ -828,6 +934,8 @@ if __name__ == "__main__":
                             sim_func=sim_func,
                             extra_iters=extra_iters,
                             probe_type=probe_type,
+                            zeroed_out_activation_dims=zeroed_out_activation_dims,
+                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                         )
                     )
 
@@ -868,7 +976,7 @@ if __name__ == "__main__":
                     plot_sim_over_the_layers(
                         sims,
                         language_pairs,
-                        f"{metric_name} over layers for {model_name} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}",
+                        f"{metric_name} over layers for {model_name} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
                         save,
                         show,
                         per_class,
@@ -908,6 +1016,8 @@ if __name__ == "__main__":
                             sim_func="cos_sim",
                             extra_iters=extra_iters,
                             probe_type=probe_type,
+                            zeroed_out_activation_dims=zeroed_out_activation_dims,
+                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                         )
                     )
                     sims_l2: dict[int, dict[int, dict[Any, float]]] = (
@@ -920,6 +1030,8 @@ if __name__ == "__main__":
                             sim_func="l2_dist",
                             extra_iters=extra_iters,
                             probe_type=probe_type,
+                            zeroed_out_activation_dims=zeroed_out_activation_dims,
+                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                         )
                     )
                     sims_maha: dict[int, dict[int, dict[Any, float]]] = (
@@ -932,6 +1044,8 @@ if __name__ == "__main__":
                             sim_func="maha_cos_sim",
                             extra_iters=extra_iters,
                             probe_type=probe_type,
+                            zeroed_out_activation_dims=zeroed_out_activation_dims,
+                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                         )
                     )
 
@@ -940,7 +1054,7 @@ if __name__ == "__main__":
                         sims_l2,
                         sims_maha,
                         language_pairs,
-                        f"Cosine, Mahalanobis cosine, and Euclidean distance over layers for {model_name} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}",
+                        f"Cosine, Mahalanobis cosine, and Euclidean distance over layers for {model_name} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
                         save,
                         show,
                         per_class,
@@ -966,6 +1080,8 @@ if __name__ == "__main__":
                             per_class,
                             sim_func,
                             probe_type=probe_type,
+                            zeroed_out_activation_dims=zeroed_out_activation_dims,
+                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                         )
                     )
 
@@ -995,7 +1111,7 @@ if __name__ == "__main__":
                     plot_sim_over_extra_iters(
                         sims,
                         layer_nums_to_plot,
-                        f"{metric_name} over extra iters for {probe_type} probes of {model_name} on the {probing_task} {language_pair} task at different layers with per_class={per_class}",
+                        f"{metric_name} over extra iters for {probe_type} probes of {model_name} on the {probing_task} {language_pair} task at different layers with per_class={per_class}{zeroing_suffix}",
                         save,
                         show,
                         per_class,
@@ -1015,6 +1131,8 @@ if __name__ == "__main__":
                             per_class,
                             sim_func,
                             probe_type=probe_type,
+                            zeroed_out_activation_dims=zeroed_out_activation_dims,
+                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                         )
                     )
 
@@ -1035,7 +1153,7 @@ if __name__ == "__main__":
 
                     plot_between_layers_confusion_matrix(
                         sims_between,
-                        f"{metric_name} between layers for {model_name} {language} {probing_task} {probe_type} probes with per_class={per_class}",
+                        f"{metric_name} between layers for {model_name} {language} {probing_task} {probe_type} probes with per_class={per_class}{zeroing_suffix}",
                         save,
                         show,
                         per_class,
@@ -1043,6 +1161,23 @@ if __name__ == "__main__":
                         vmin=vmin,
                         vmax=vmax,
                     )
+    elif experiment_type == "weight_magnitudes":
+        for language in languages:
+            for model_name in model_names:
+                layer_nums: int = get_number_of_layers_from_file(model_name)
+                for layer_num in range(layer_nums):
+                    for probing_task in probing_tasks:
+                        for extra_iters in extra_iter_nums:
+                            plot_probe_weight_magnitudes(
+                                model_name,
+                                language,
+                                layer_num,
+                                "standard",
+                                probe_type,
+                                extra_iters,
+                                zeroed_out_activation_dims=zeroed_out_activation_dims,
+                                zeroed_out_weight_dims=zeroed_out_weight_dims,
+                            )
     else:
         raise ValueError(
             f"{experiment_type} invalid. exp must be per_layer, per_layer_three_metrics, per_extra_iter, or between_layers."

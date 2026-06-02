@@ -1,7 +1,10 @@
+from hashlib import sha256
+
 from torch.utils.data import Dataset, DataLoader
 import json
 import random
 import csv
+import nltk
 
 from utils import (
     SICK_DIRTY_NL_FILE,
@@ -147,13 +150,16 @@ class SICKDirtyDataset(Dataset):
 
 
 class SICKMergedDataset(Dataset):
-    def __init__(self, language: str, split: str) -> None:
+    def __init__(
+        self, language: str, split: str, control_type="noun_based_control_label"
+    ) -> None:
         self.sentence_pairs: list[tuple[str, str]] = []
         self.labels: list[dict[str, int]] = []
         self.original_ids: list[int] = []
 
         self.language: str = language
         self.split: str = split
+        self.control_type: str = control_type
 
         self.load_dataset()
 
@@ -179,8 +185,7 @@ class SICKMergedDataset(Dataset):
                 self.labels.append(
                     {
                         "standard": int(values[standard_label_key]),
-                        "control": int(values["control_label"]),
-                        "disjunct_control": int(values["disjunct_control_label"]),
+                        "control": int(values[self.control_type]),
                     }
                 )
                 self.original_ids.append(int(id))
@@ -224,7 +229,7 @@ def add_to_dict(dictionary, key, value) -> None:
         dictionary[key] = value
 
 
-def create_disjunct_labels(dataset_dict, unique_labels, amount_per_label):
+def create_disjunct_control_labels(dataset_dict, unique_labels, amount_per_label):
     print("Creating disjunct control labels")
     # Create dictionary with the label_ratios when we exclude each of the labels
     total_amount: int = sum(amount_per_label)
@@ -254,7 +259,7 @@ def create_disjunct_labels(dataset_dict, unique_labels, amount_per_label):
         dataset_dict[id]["disjunct_control_label"] = disjunct_control_label
 
 
-def create_non_disjunct_labels(dataset_dict, unique_labels, amount_per_label):
+def create_non_disjunct_control_labels(dataset_dict, unique_labels, amount_per_label):
     print("Creating non-disjunct control labels")
     print(f"Amount per label: {amount_per_label}")
     label_ratios: list[float] = [
@@ -268,7 +273,52 @@ def create_non_disjunct_labels(dataset_dict, unique_labels, amount_per_label):
 
     # Add the control label to each row in the dataset
     for id in dataset_dict.keys():
-        dataset_dict[id]["control_label"] = control_labels.pop(0)
+        dataset_dict[id]["random_choice_control_label"] = control_labels.pop(0)
+
+
+def create_id_hash_control_labels(dataset_dict, unique_labels) -> None:
+    print("Creating pair id-based control labels")
+
+    n: int = len(unique_labels)
+
+    for id in dataset_dict.keys():
+        id_bytes = str(id).encode("utf-8")
+        sha256_hash = sha256(id_bytes).hexdigest()
+        id_hash_control_label: int = int(sha256_hash, 16) % n
+        dataset_dict[id]["id_hash_control_label"] = id_hash_control_label
+
+
+def create_noun_based_control_labels(dataset_dict, unique_labels) -> None:
+    print("Creating noun-based control labels")
+
+    noun_tags = {"NN", "NNS", "NNP", "NNPS"}
+
+    # Map each noun to the ids of sentence pairs whose first noun is that noun
+    noun_to_ids: dict[str, list[str]] = {}
+    for id, values in dataset_dict.items():
+        sentence_a: str = values["sentence_a_en"]
+        tokens = nltk.word_tokenize(sentence_a)
+        pos_tags = nltk.pos_tag(tokens)
+
+        noun = next(
+            (token.lower() for token, tag in pos_tags if tag in noun_tags),
+            "__no_noun__",
+        )
+
+        if noun not in noun_to_ids:
+            noun_to_ids[noun] = []
+        noun_to_ids[noun].append(id)
+
+    # Assign a random label to each distinct noun
+    noun_to_label: dict[str, int] = {
+        noun: random.choice(unique_labels) for noun in noun_to_ids
+    }
+
+    # Write the label back to each sentence pair
+    for noun, ids in noun_to_ids.items():
+        label = noun_to_label[noun]
+        for id in ids:
+            dataset_dict[id]["noun_based_control_label"] = label
 
 
 def create_control_labels(
@@ -283,14 +333,21 @@ def create_control_labels(
     if predetermined_label_ratio is None:
         # Calculate the real ratio
         amount_per_label: list[int] = [0 for _ in unique_labels]
-        for tup in dataset_dict.values():
-            standard_label: int = tup["standard_label"]
+        for entry in dataset_dict.values():
+            standard_label: int = entry["standard_label"]
             amount_per_label[standard_label] += 1
 
         if disjunct:
-            create_disjunct_labels(dataset_dict, unique_labels, amount_per_label)
+            create_disjunct_control_labels(
+                dataset_dict, unique_labels, amount_per_label
+            )
         else:
-            create_non_disjunct_labels(dataset_dict, unique_labels, amount_per_label)
+            create_non_disjunct_control_labels(
+                dataset_dict, unique_labels, amount_per_label
+            )
+
+        create_id_hash_control_labels(dataset_dict, unique_labels)
+        create_noun_based_control_labels(dataset_dict, unique_labels)
     else:
         assert (
             round(sum(list(predetermined_label_ratio)), 3) == 1.00
@@ -300,7 +357,7 @@ def create_control_labels(
         amount_per_label = [
             round(ratio * total_amount_of_labels) for ratio in predetermined_label_ratio
         ]
-        create_disjunct_labels(dataset_dict, unique_labels, amount_per_label)
+        create_disjunct_control_labels(dataset_dict, unique_labels, amount_per_label)
 
 
 def create_merged_json(save=False) -> None:

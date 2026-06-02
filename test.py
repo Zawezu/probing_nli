@@ -50,9 +50,13 @@
 #     run_nli_inference()
 
 
-on = False
+# on = False
 
-if on:
-    var = 0
+# if on:
+#     var = 0
 
-print(var)
+# print(var)
+
+import nltk
+
+nltk.download()

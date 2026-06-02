@@ -23,6 +23,8 @@ def run_full_experiment_1(
     model_name: str,
     force_probe_creation: bool,
     num_layers: int | None,
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
 ) -> ExperimentResult:
     """
     Performs a full run of experiment 1
@@ -35,7 +37,13 @@ def run_full_experiment_1(
     )
     # Create empty ExperimentResult that we will gradually fill with the results
     exp_result = ExperimentResult(
-        experiment_number, language, probing_task, probe_type, model_name
+        experiment_number,
+        language,
+        probing_task,
+        probe_type,
+        model_name,
+        zeroed_out_activation_dims=zeroed_out_activation_dims,
+        zeroed_out_weight_dims=zeroed_out_weight_dims,
     )
 
     layers: list[int] = list(range(get_number_of_layers_from_file(model_name)))
@@ -68,6 +76,8 @@ def run_full_experiment_1(
             model_name,
             activation_dataset_train=activation_dataset_train,
             force_probe_creation=force_probe_creation,
+            zeroed_out_activation_dims=zeroed_out_activation_dims,
+            zeroed_out_weight_dims=zeroed_out_weight_dims,
         )
 
         # Get train predictions for generating the metrics
@@ -117,8 +127,9 @@ def run_experiment_1(
     model_names: list[str],
     force_probe_creation: bool,
     save_results: bool = True,
-    num_layers: int
-    | None = None,  # Attribute to force the model to only generate a number of layers
+    num_layers: int | None = None,
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
 ) -> list[ExperimentResult]:
     exp_results: list[ExperimentResult] = []
 
@@ -133,6 +144,8 @@ def run_experiment_1(
                 model_name,
                 force_probe_creation,
                 num_layers,
+                zeroed_out_activation_dims,
+                zeroed_out_weight_dims,
             )
 
             # Run full experiment on standard task
@@ -143,6 +156,8 @@ def run_experiment_1(
                 model_name,
                 force_probe_creation,
                 num_layers,
+                zeroed_out_activation_dims,
+                zeroed_out_weight_dims,
             )
 
             # Add the marginal metrics (so the difference between standard and control metrics) to the standard experiment result
@@ -181,6 +196,18 @@ if __name__ == "__main__":
         default="True",
         const="True",
     )
+    parser.add_argument(
+        "-zad",
+        help="number of highest-magnitude activation dims to zero out before training (0 = disabled)",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "-zwd",
+        help="number of highest-magnitude weight dims to zero out per class after loading (0 = disabled)",
+        type=int,
+        default=0,
+    )
 
     args: argparse.Namespace = parser.parse_args()
     print(args)
@@ -191,6 +218,8 @@ if __name__ == "__main__":
     num_layers: int | None = args.nl
     force_probe_creation: bool = args.f.lower() == "true"
     save_results: bool = args.sr.lower() == "true"
+    zeroed_out_activation_dims: int = args.zad
+    zeroed_out_weight_dims: int = args.zwd
 
     run_experiment_1(
         languages,
@@ -201,4 +230,6 @@ if __name__ == "__main__":
         force_probe_creation,
         num_layers=num_layers,
         save_results=save_results,
+        zeroed_out_activation_dims=zeroed_out_activation_dims,
+        zeroed_out_weight_dims=zeroed_out_weight_dims,
     )

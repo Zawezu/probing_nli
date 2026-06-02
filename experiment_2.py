@@ -33,6 +33,8 @@ def run_full_experiment_2(
     num_layers: int | None,
     iterations_per_refit: int,
     save_refitted_probes: bool = True,
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
 ) -> list[ExperimentResult]:
     """
     Performs a full run of experiment 2
@@ -55,6 +57,8 @@ def run_full_experiment_2(
             probe_type,
             model_name,
             refit_num * iterations_per_refit,
+            zeroed_out_activation_dims=zeroed_out_activation_dims,
+            zeroed_out_weight_dims=zeroed_out_weight_dims,
         )
         for refit_num in range(num_refits)
     ]
@@ -93,6 +97,8 @@ def run_full_experiment_2(
             model_name,
             activation_dataset_train=activation_dataset_train_a,
             force_probe_creation=force_probe_creation,
+            zeroed_out_activation_dims=zeroed_out_activation_dims,
+            zeroed_out_weight_dims=zeroed_out_weight_dims,
         )
 
         # Load labels for this layer (not necessary in theory, but done just in case the layer activations somehow got misaligned)
@@ -120,6 +126,7 @@ def run_full_experiment_2(
                     probe_type,
                     model_name,
                     extra_iters,
+                    zeroed_out_activation_dims,
                 ):
                     probe = load_probe(
                         language_merged_string,
@@ -128,6 +135,8 @@ def run_full_experiment_2(
                         probe_type,
                         model_name,
                         refit_num * iterations_per_refit,
+                        zeroed_out_activation_dims=zeroed_out_activation_dims,
+                        zeroed_out_weight_dims=zeroed_out_weight_dims,
                     )
                 else:
                     # Otherwise, refit and save the probe
@@ -143,6 +152,7 @@ def run_full_experiment_2(
                             probe_type,
                             model_name,
                             extra_iters,
+                            zeroed_out_activation_dims=zeroed_out_activation_dims,
                         )
 
             # Get all predictions for generating the metrics
@@ -224,6 +234,8 @@ def run_experiment_2(
     force_refit_probe_creation: bool = True,
     save_results: bool = True,
     num_layers: int | None = None,
+    zeroed_out_activation_dims: int = 0,
+    zeroed_out_weight_dims: int = 0,
 ) -> list[ExperimentResult]:
     exp_results: list[ExperimentResult] = []
 
@@ -241,6 +253,8 @@ def run_experiment_2(
                 num_refits,
                 num_layers,
                 iterations_per_refit,
+                zeroed_out_activation_dims=zeroed_out_activation_dims,
+                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
             # Run full experiment on standard task
@@ -254,6 +268,8 @@ def run_experiment_2(
                 num_refits,
                 num_layers,
                 iterations_per_refit,
+                zeroed_out_activation_dims=zeroed_out_activation_dims,
+                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
             for control_exp_result, standard_exp_result in zip(
@@ -302,6 +318,18 @@ if __name__ == "__main__":
         default="True",
         const="True",
     )
+    parser.add_argument(
+        "-zad",
+        help="number of highest-magnitude activation dims to zero out before training (0 = disabled)",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "-zwd",
+        help="number of highest-magnitude weight dims to zero out per class after loading (0 = disabled)",
+        type=int,
+        default=0,
+    )
 
     args: argparse.Namespace = parser.parse_args()
     print(args)
@@ -315,6 +343,8 @@ if __name__ == "__main__":
     iterations_per_refit: int = args.ir
     force_probe_creation: bool = args.f.lower() == "true"
     save_results: bool = args.sr.lower() == "true"
+    zeroed_out_activation_dims: int = args.zad
+    zeroed_out_weight_dims: int = args.zwd
 
     run_experiment_2(
         language_pairs,
@@ -327,4 +357,6 @@ if __name__ == "__main__":
         force_probe_creation=force_probe_creation,
         num_layers=num_layers,
         save_results=save_results,
+        zeroed_out_activation_dims=zeroed_out_activation_dims,
+        zeroed_out_weight_dims=zeroed_out_weight_dims,
     )
