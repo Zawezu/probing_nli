@@ -10,16 +10,20 @@ from utils import LABEL_MAP
 RESPONSES_FOLDER = "./data/responses"
 LABEL_ACCEPTED_VERSIONS: dict[str, dict[str, list[str]]] = {
     "en": {
-        "neutral": ["neutr"],
+        "neutral": ["neutral"],
         "entailment": ["entail"],
-        "contradiction": ["contrad"],
+        "contradiction": ["contradict", "contradition"],
     },
-    "es": {"neutral": ["neutr"], "entailment": ["impli"], "contradiction": ["contrad"]},
+    "es": {
+        "neutral": ["neutral", "neutro"],
+        "entailment": ["implica"],
+        "contradiction": ["contradic"],
+    },
     "jp": {"neutral": ["中立"], "entailment": ["含意"], "contradiction": ["矛盾"]},
     "nl": {
-        "neutral": ["neutr"],
-        "entailment": ["impli"],
-        "contradiction": ["tegensp", "contrad"],
+        "neutral": ["neutral", "neutraal"],
+        "entailment": ["implicatie"],
+        "contradiction": ["tegensp", "contradict"],
     },
 }
 

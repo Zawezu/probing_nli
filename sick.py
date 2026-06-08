@@ -1,5 +1,7 @@
+from collections import Counter
 from hashlib import sha256
 
+from sklearn.metrics import f1_score
 from torch.utils.data import Dataset, DataLoader
 import json
 import random
@@ -210,6 +212,21 @@ class SICKMergedDataset(Dataset):
         return len(self.sentence_pairs)
 
 
+def calculate_majority_class_baseline_f1(
+    probing_task: str, language: str, control_type: str = "noun_based_control_label"
+) -> float:
+    train_dataset = SICKMergedDataset(language, "train", control_type)
+    majority_class: int = Counter(
+        train_dataset.get_labels(probing_task=probing_task)
+    ).most_common(1)[0][0]
+
+    test_dataset = SICKMergedDataset(language, "test", control_type)
+    test_labels: list[int] = test_dataset.get_labels(probing_task=probing_task)
+
+    predictions: list[int] = [majority_class] * len(test_labels)
+    return float(f1_score(test_labels, predictions, average="macro"))
+
+
 def get_dataset_and_dataloader(
     language, split, batch_size=1
 ) -> tuple[SICKMergedDataset, DataLoader[tuple[tuple[str, str], dict[str, int], int]]]:
@@ -411,7 +428,7 @@ def create_merged_json(save=False) -> None:
 
 
 if __name__ == "__main__":
-    create_merged_json(save=True)
+    # create_merged_json(save=True)
     # for language in LANGUAGES:
     #     print(language)
     #     split= "train"
@@ -419,3 +436,8 @@ if __name__ == "__main__":
     #     dataset, dataloader = get_dataset_and_dataloader(language, split)
 
     #     print(dataset.sentence_pairs[:10])
+    for probing_task in ["standard", "control"]:
+        for language in ["en", "jp"]:
+            print(
+                f"f1 for majority class of {probing_task} {language}: {calculate_majority_class_baseline_f1('standard', 'en')}"
+            )

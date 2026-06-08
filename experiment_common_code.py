@@ -1,11 +1,13 @@
 import math
 import pickle
+import re
 from pathlib import Path
 from typing import Any
 from itertools import product
 from collections import defaultdict
 from matplotlib.pylab import ndarray
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import numpy as np
 import seaborn as sns
 from torch import Tensor
@@ -18,6 +20,7 @@ from utils import (
     REVERSE_LABEL_MAP,
     get_verbose_version_of_language_string,
 )
+from sick import calculate_majority_class_baseline_f1
 
 mlp_training_parameters: dict[str, float | int] = {
     "learning_rate": 0.001,
@@ -345,7 +348,7 @@ class ExperimentResult:
                     idxs_prev_layer: dict[str, set[int]] = cummulative_idxs
                 else:
                     # If not cummulative, the indices are those of just the previous layer classifications
-                    idxs_prev_layer = idxs_per_cm_cell[i - 1].copy()
+                    idxs_prev_layer = idxs_per_cm_cell[i].copy()
 
                 overlapping_idxs: dict[str, set[int]] = {}
                 overlapping_idx_amounts: dict[str, int] = {}
@@ -480,6 +483,8 @@ def show_plots(
     legend_position="upper left",
     zeroed_out_activation_dims_list: list[int] = [0],
     zeroed_out_weight_dims_list: list[int] = [0],
+    horizontal_line: str | int = "",
+    subplot_titles: list[str] | None = None,
 ) -> None:
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
@@ -658,8 +663,13 @@ def show_plots(
         filename,
         y_axis_range,
         legend_position=legend_position,
+        horizontal_line=horizontal_line,
+        subplot_titles=subplot_titles,
     )
 
+
+_CROSS_LINGUAL_RE = re.compile(r"trained in (.*?), tested in (.*)")
+_TEST_Z_RE = re.compile(r"test (.+)")
 
 OKABE_ITO_PALETTE: list[str] = [
     "#E69F00",
@@ -671,6 +681,13 @@ OKABE_ITO_PALETTE: list[str] = [
     "#CC79A7",
     "#000000",
 ]
+
+LANGUAGE_COLOURS = {
+    "en": ["#D81B1B", "#B76060"],
+    "es": ["#E5BC1E", "#C5B268"],
+    "nl": ["#0752FF", "#6683C3"],
+    "jp": ["#00AFCA", "#6CAFB9"],
+}
 
 
 def plot_metrics_by_group(
@@ -684,6 +701,8 @@ def plot_metrics_by_group(
     xlabel: str = "Layer",
     scale: int = 1,
     sort_lines: bool = False,
+    horizontal_line: str | int = "",
+    subplot_titles: list[str] | None = None,
 ) -> None:
     """
     Plot metrics grouped by experiment groups.
@@ -704,6 +723,15 @@ def plot_metrics_by_group(
         scale: Scaling factor for figure size
     """
     num_plots: int = len(plots_to_make)
+
+    if (
+        subplot_titles is not None
+        and subplot_titles
+        and len(subplot_titles) != num_plots
+    ):
+        print(
+            f"Warning: subplot_titles has {len(subplot_titles)} entries but there are {num_plots} subplots."
+        )
 
     # Calculate grid shape to approximate a square
     cols: int = math.ceil(math.sqrt(num_plots))
@@ -834,13 +862,25 @@ def plot_metrics_by_group(
         else:
             title = f"Results of {', '.join(common_parts)} over the {xlabel}s"
 
-        ax.set_title(title, fontsize=7)
+        if subplot_titles is None or (
+            subplot_titles and plot_idx >= len(subplot_titles)
+        ):
+            ax.set_title(title, fontsize=10)
+        elif subplot_titles:
+            ax.set_title(subplot_titles[plot_idx], fontsize=10)
+        # else subplot_titles == [] → no title
 
         # Prepare line data with average values for sorting
         lines_to_plot: list[dict] = []
+        seen_test_a_base: bool = False
         for i, line_request in enumerate(group_of_line_requests):
             exp_result: ExperimentResult = line_request["exp_result"]
             split: str = line_request["split"]
+            is_test_a_base: bool = split == "test_a" and exp_result.extra_iter_num == 0
+            if is_test_a_base:
+                if seen_test_a_base:
+                    continue
+                seen_test_a_base = True
             class_id: str = line_request["class_id"]
             class_name: str = line_request["class_name"]
             results: list[float | dict[str, float]] = exp_result.metrics[split][metric]
@@ -852,7 +892,54 @@ def plot_metrics_by_group(
                 for key in attribute_sequence
                 if key in varying_attrs
             ]
+
+            cl_idx = next(
+                (
+                    idx
+                    for idx, p in enumerate(legend_parts)
+                    if _CROSS_LINGUAL_RE.fullmatch(p)
+                ),
+                None,
+            )
+            tz_idx = next(
+                (idx for idx, p in enumerate(legend_parts) if _TEST_Z_RE.fullmatch(p)),
+                None,
+            )
+
             legend_label: str = " ".join(legend_parts)
+
+            if cl_idx is not None and tz_idx is not None:
+                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
+                tz = _TEST_Z_RE.fullmatch(legend_parts[tz_idx])
+                X, Y, raw_Z = cl.group(1), cl.group(2), tz.group(1)  # type: ignore
+                if raw_Z == "a":
+                    other_parts = [
+                        p
+                        for j, p in enumerate(legend_parts)
+                        if j not in {cl_idx, tz_idx}
+                    ]
+                    special = f"trained in {X}, re-trained in {Y}, and tested in {X}"
+                    legend_label = " ".join([*other_parts, special]).strip()
+                elif raw_Z == "b":
+                    other_parts = [
+                        p
+                        for j, p in enumerate(legend_parts)
+                        if j not in {cl_idx, tz_idx}
+                    ]
+                    special = f"trained in {X}, re-trained and tested in {Y}"
+                    legend_label = " ".join([*other_parts, special]).strip()
+            elif (
+                cl_idx is not None
+                and len(legend_parts) == 1
+                and exp_result.extra_iter_num > 0
+            ):
+                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
+                X, Y = cl.group(1), cl.group(2)  # type: ignore
+                legend_label = f"trained in {X}, re-trained and tested in {Y}"
+
+            if is_test_a_base:
+                lang_a = exp_result.language.split("→")[0]
+                legend_label = f"trained and tested in {LANGUAGE_FULL_NAME_MAP[lang_a]}"
 
             if "per_class" in metric or "overlapping_idx_amounts" in metric:
                 # If we are dealing with a per-class metric, we add a plot for the requested label id
@@ -873,6 +960,10 @@ def plot_metrics_by_group(
                         "results": results_for_this_label,
                         "legend_label": legend_label,
                         "average_value": average_value,
+                        "is_control": "control" in exp_result.probing_task,
+                        "is_test_a_base": is_test_a_base,
+                        "probing_task": exp_result.probing_task,
+                        "language": exp_result.language,
                     }
                 )
             else:
@@ -884,23 +975,96 @@ def plot_metrics_by_group(
                         "results": results,
                         "legend_label": legend_label,
                         "average_value": average_value,
+                        "is_control": "control" in exp_result.probing_task,
+                        "is_test_a_base": is_test_a_base,
+                        "probing_task": exp_result.probing_task,
+                        "language": exp_result.language,
                     }
                 )
 
         if sort_lines:
             lines_to_plot.sort(key=lambda x: x["average_value"], reverse=True)
 
-        ax.set_prop_cycle(color=OKABE_ITO_PALETTE)
-        for line_data in lines_to_plot:
-            ax.plot(
-                line_data["layers"],
-                line_data["results"],
-                marker="o",
-                label=line_data["legend_label"],
+        lang_color_counts: dict[str, int] = defaultdict(int)
+        okabe_ito_idx: int = 0
+        for i, line_data in enumerate(lines_to_plot):
+            raw_lang: str = line_data["language"]
+            lang_parts = raw_lang.split("→")
+            lang_key: str = (
+                lang_parts[0] if line_data["is_test_a_base"] else lang_parts[-1]
             )
+            lang_count: int = lang_color_counts[lang_key]
+            lang_color_counts[lang_key] += 1
+
+            if lang_key in LANGUAGE_COLOURS:
+                if lang_count == 0:
+                    colour = LANGUAGE_COLOURS[lang_key][0]
+                elif lang_count == 1:
+                    colour = mcolors.to_rgb(LANGUAGE_COLOURS[lang_key][1])
+                else:
+                    colour = OKABE_ITO_PALETTE[okabe_ito_idx % len(OKABE_ITO_PALETTE)]
+                    okabe_ito_idx += 1
+            else:
+                colour = OKABE_ITO_PALETTE[okabe_ito_idx % len(OKABE_ITO_PALETTE)]
+                okabe_ito_idx += 1
+
+            line_data["colour"] = colour
+            if horizontal_line == "control_average" and line_data["is_control"]:
+                ax.axhline(
+                    y=line_data["average_value"],
+                    linestyle="--",
+                    alpha=0.7,
+                    color=colour,
+                    label=f"avg {line_data['legend_label']}",
+                )
+            else:
+                ax.plot(
+                    line_data["layers"],
+                    line_data["results"],
+                    # marker="o",
+                    label=line_data["legend_label"],
+                    color=colour,
+                    linewidth=3,
+                )
+
+        if horizontal_line == "baseline_f1":
+            if "f1" not in metric:
+                print(
+                    f"Warning: horizontal_line='baseline_f1' was specified but metric is '{metric}', not an F1 metric."
+                )
+            baseline_values: list[float] = [
+                calculate_majority_class_baseline_f1(
+                    probing_task=line_data["probing_task"],
+                    language="en",  # the label proportions are very similar in Japanese and other languages, so we just use English
+                )
+                for line_data in lines_to_plot
+            ]
+            if max(baseline_values) - min(baseline_values) <= 0.05:
+                ax.axhline(
+                    y=float(np.mean(baseline_values)),
+                    linestyle="--",
+                    alpha=0.7,
+                    color="gray",
+                    label="majority class baseline",
+                )
+            else:
+                for i, (line_data, baseline) in enumerate(
+                    zip(lines_to_plot, baseline_values)
+                ):
+                    colour = line_data["colour"]
+                    label = f"majority baseline {line_data['legend_label']}".strip()
+                    ax.axhline(
+                        y=baseline, linestyle="--", alpha=0.7, color=colour, label=label
+                    )
+        elif horizontal_line != "" and horizontal_line != "control_average":
+            ax.axhline(y=float(horizontal_line), linestyle="--", alpha=0.7)
 
         ax.set_xlabel(xlabel)
-        ax.set_ylabel(metric.replace("_", " "))
+        if metric.startswith("marginal_"):
+            ylabel = f"selectivity ({metric[len('marginal_'):].replace('_', ' ')})"
+        else:
+            ylabel = metric.replace("_", " ")
+        ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3)
         ax.legend(loc=legend_position, fontsize=7)
         ax.set_ylim(y_axis_range)

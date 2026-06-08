@@ -1,5 +1,6 @@
 from typing import Any
 from pathlib import Path
+import math
 import sys
 import numpy as np
 import matplotlib
@@ -8,9 +9,11 @@ import seaborn as sns
 import argparse
 
 from probes import AnyProbe, load_probe
+from experiment_common_code import OKABE_ITO_PALETTE
 from utils import (
     LANGUAGES,
     MODEL_NAMES,
+    MODEL_THESIS_NAMES,
     PLOTS_FOLDER,
     REVERSE_LABEL_MAP,
     get_language_pair_combinations,
@@ -231,6 +234,8 @@ def get_filepath(title) -> Path:
 
     if "between_layers" in clean_title:
         folder = "between_layers"
+    elif "at_max_extra_iters" in clean_title:
+        folder = "per_extra_iter"
     elif "over_layers" in clean_title or "comparison" in clean_title:
         folder = "per_layers"
     elif "over_extra_iters" in clean_title:
@@ -796,6 +801,116 @@ def plot_sim_over_extra_iters(
     plt.close()
 
 
+def plot_sim_over_layers_at_max_iters(
+    sims_per_model_per_pair: dict[
+        str, dict[str, dict[int, dict[int, dict[Any, float]]]]
+    ],
+    max_extra_iters: int,
+    title: str,
+    save: bool,
+    show: bool,
+    sim_func: str,
+    per_language_pair: bool,
+    vmin: float = 0.0,
+    vmax: float = 1.0,
+) -> None:
+    """
+    Plot similarity at max extra iters over layers.
+    x-axis: layer, y-axis: similarity (averaged across classes).
+    If per_language_pair: grid of subplots (one per model), one line per language pair.
+    Otherwise: single plot, one line per model labeled with its thesis name.
+    """
+    model_names_in_plot = list(sims_per_model_per_pair.keys())
+    n_models = len(model_names_in_plot)
+
+    first_model_sims = next(iter(sims_per_model_per_pair.values()))
+    first_pair_sims = next(iter(first_model_sims.values()))
+    layers: list[int] = sorted(first_pair_sims.keys())
+    lang_pair_strs: list[str] = list(first_model_sims.keys())
+    metric_name = get_similarity_metric_name(sim_func)
+
+    if per_language_pair:
+        n_cols: int = math.ceil(math.sqrt(n_models))
+        n_rows: int = math.ceil(n_models / n_cols)
+        fig, axes = plt.subplots(
+            n_rows, n_cols, figsize=(7 * n_cols, 4 * n_rows), squeeze=False
+        )
+
+        for idx, model_name in enumerate(model_names_in_plot):
+            row: int = idx // n_cols
+            col: int = idx % n_cols
+            ax = axes[row, col]
+            model_sims = sims_per_model_per_pair[model_name]
+
+            for palette_idx, lang_pair_str in enumerate(lang_pair_strs):
+                pair_sims = model_sims[lang_pair_str]
+                class_nums: list[int] = sorted(pair_sims[layers[0]].keys())
+                sim_values: list[float] = [
+                    float(
+                        np.mean(
+                            [
+                                pair_sims[layer][class_num][max_extra_iters]
+                                for class_num in class_nums
+                            ]
+                        )
+                    )
+                    for layer in layers
+                ]
+                colour = OKABE_ITO_PALETTE[palette_idx % len(OKABE_ITO_PALETTE)]
+                ax.plot(
+                    layers, sim_values, label=lang_pair_str, color=colour, linewidth=3
+                )
+
+            ax.set_title(MODEL_THESIS_NAMES.get(model_name, model_name), fontsize=10)
+            ax.set_xlabel("Layer")
+            ax.set_ylabel(metric_name)
+            ax.grid(True, alpha=0.3)
+            ax.set_ylim((vmin, vmax))
+            ax.legend(loc="upper left", fontsize=7)
+
+        for idx in range(n_models, n_rows * n_cols):
+            axes[idx // n_cols, idx % n_cols].set_visible(False)
+    else:
+        fig, ax = plt.subplots(figsize=(7, 4))
+
+        for palette_idx, model_name in enumerate(model_names_in_plot):
+            model_sims = sims_per_model_per_pair[model_name]
+            class_nums = sorted(next(iter(model_sims.values()))[layers[0]].keys())
+            avg_values: list[float] = [
+                float(
+                    np.mean(
+                        [
+                            model_sims[lp][layer][class_num][max_extra_iters]
+                            for lp in lang_pair_strs
+                            for class_num in class_nums
+                        ]
+                    )
+                )
+                for layer in layers
+            ]
+            colour = OKABE_ITO_PALETTE[palette_idx % len(OKABE_ITO_PALETTE)]
+            label = MODEL_THESIS_NAMES.get(model_name, model_name)
+            ax.plot(layers, avg_values, label=label, color=colour, linewidth=3)
+
+        ax.set_xlabel("Layer")
+        ax.set_ylabel(metric_name)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(vmin, vmax)
+        ax.legend(loc="upper left", fontsize=7)
+
+    fig.suptitle(title, fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    if save:
+        filepath: Path = get_filepath(title)
+        plt.savefig(filepath, dpi=100, bbox_inches="tight")
+
+    if show:
+        plt.show()
+
+    plt.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -815,7 +930,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-e",
         help="enter the experiment to perform: per_layer, per_layer_three_metrics, per_extra_iter, between_layers, or weight_magnitudes",
-        default="per_extra_iter",
+        default="",
     )
 
     parser.add_argument(
@@ -964,7 +1079,7 @@ if __name__ == "__main__":
                     #     plot_sim_confusion_matrix(
                     #         sims,
                     #         layer_num,
-                    #         f"{metric_name} comparison of {model_name} {probe_type} probes at layer {layer_num} refitted for {extra_iters} iterations with per_class={per_class}",
+                    #         f"{metric_name} comparison of {model_name} {probing_task} {probe_type} probes at layer {layer_num} refitted for {extra_iters} iterations with per_class={per_class}",
                     #         save,
                     #         show,
                     #         per_class,
@@ -976,7 +1091,7 @@ if __name__ == "__main__":
                     plot_sim_over_the_layers(
                         sims,
                         language_pairs,
-                        f"{metric_name} over layers for {model_name} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
+                        f"{metric_name} over layers for {model_name} {probing_task} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
                         save,
                         show,
                         per_class,
@@ -1054,20 +1169,30 @@ if __name__ == "__main__":
                         sims_l2,
                         sims_maha,
                         language_pairs,
-                        f"Cosine, Mahalanobis cosine, and Euclidean distance over layers for {model_name} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
+                        f"Cosine, Mahalanobis cosine, and Euclidean distance over layers for {model_name} {probing_task} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
                         save,
                         show,
                         per_class,
                     )
     elif experiment_type == "per_extra_iter":
+        import pandas as pd
+
         num_refits = 2
         iterations_per_refit = 1000
-        for model_name in model_names:
-            for probing_task in probing_tasks:
-                language_pairs: list[tuple[str, str]] = get_language_pair_permutations(
-                    languages
-                )
+        for probing_task in probing_tasks:
+            language_pairs: list[tuple[str, str]] = get_language_pair_permutations(
+                languages
+            )
+            # {model_name: {lang_pair_str: {class_num: avg_sim_at_max_iters}}}
+            table_data: dict[str, dict[str, dict[int, float]]] = {
+                mn: {} for mn in model_names
+            }
 
+            sims_per_model_per_pair: dict[
+                str, dict[str, dict[int, dict[int, dict[Any, float]]]]
+            ] = {}
+            for model_name in model_names:
+                sims_per_model_per_pair[model_name] = {}
                 for language_pair in language_pairs:
                     sims: dict[int, dict[int, dict[Any, float]]] = (
                         calculate_per_layer_sims_over_extra_iters(
@@ -1085,40 +1210,80 @@ if __name__ == "__main__":
                         )
                     )
 
-                    # print(sims)
-
-                    # print(sims)
-
                     if sim_func == "cos_sim" or sim_func == "maha_cos_sim":
-                        # vmin, vmax = 0.99, 1.01
                         vmin, vmax = get_similarity_range(sims)
                     elif sim_func == "l2_dist":
                         vmin, vmax = get_similarity_range(sims)
                     else:
                         raise ValueError(f"Unknown sim_func ({sim_func})")
 
-                    # for value in [
-                    #     val
-                    #     for d1 in sims.values()
-                    #     for d2 in d1.values()
-                    #     for val in d2.values()
-                    # ]:
-                    #     if value < 0.0:
-                    #         print(f"Found negative similarity: {value}")
-
                     metric_name = get_similarity_metric_name(sim_func)
                     layer_nums_to_plot: list[int] = list(sims.keys())[::4]
-                    plot_sim_over_extra_iters(
-                        sims,
-                        layer_nums_to_plot,
-                        f"{metric_name} over extra iters for {probe_type} probes of {model_name} on the {probing_task} {language_pair} task at different layers with per_class={per_class}{zeroing_suffix}",
-                        save,
-                        show,
-                        per_class,
-                        sim_func,
-                        vmin=vmin,
-                        vmax=vmax,
-                    )
+                    # if save or show:
+                    #     plot_sim_over_extra_iters(
+                    #         sims,
+                    #         layer_nums_to_plot,
+                    #         f"{metric_name} over extra iters for {probe_type} {probing_task} probes of {model_name} on the {probing_task} {language_pair} task at different layers with per_class={per_class}{zeroing_suffix}",
+                    #         save,
+                    #         show,
+                    #         per_class,
+                    #         sim_func,
+                    #         vmin=vmin,
+                    #         vmax=vmax,
+                    #     )
+
+                    # Accumulate similarity at max extra_iters, averaged across layers
+                    lang_pair_str = f"{language_pair[0]}→{language_pair[1]}"
+                    sims_per_model_per_pair[model_name][lang_pair_str] = sims
+                    first_layer = next(iter(sims))
+                    class_nums_in_sims = sorted(sims[first_layer].keys())
+                    max_iters = max(sims[first_layer][class_nums_in_sims[0]].keys())
+                    table_data[model_name][lang_pair_str] = {
+                        class_num: float(
+                            np.mean(
+                                [
+                                    sims[layer_num][class_num][max_iters]
+                                    for layer_num in sims
+                                ]
+                            )
+                        )
+                        for class_num in class_nums_in_sims
+                    }
+
+            if sims_per_model_per_pair and (save or show):
+                max_extra_iters = num_refits * iterations_per_refit
+
+                metric_name_new = get_similarity_metric_name(sim_func)
+                plot_sim_over_layers_at_max_iters(
+                    sims_per_model_per_pair,
+                    max_extra_iters,
+                    f"{metric_name_new} after {max_extra_iters} iters over layers for {probing_task} {probe_type} probes with per_class={per_class}{zeroing_suffix}",
+                    save,
+                    show,
+                    sim_func,
+                    per_language_pair=False,
+                )
+
+            # Build and print one DataFrame per class
+            lang_pair_strs = [f"{lp[0]}→{lp[1]}" for lp in language_pairs]
+            thesis_names = [MODEL_THESIS_NAMES[mn] for mn in model_names]
+            class_nums_for_df = sorted(
+                table_data[model_names[0]][lang_pair_strs[0]].keys()
+            )
+            for class_num in class_nums_for_df:
+                class_name = get_class_name(class_num, per_class)
+                df = pd.DataFrame(
+                    {
+                        lps: [table_data[mn][lps][class_num] for mn in model_names]
+                        for lps in lang_pair_strs
+                    },
+                    index=thesis_names,
+                )
+                col_fmt = "l" + "r" * len(lang_pair_strs)
+                latex_str = df.to_latex(float_format="%.4f", column_format=col_fmt)  # type: ignore[call-overload]
+                latex_str = "\\resizebox{\\textwidth}{!}{\n" + latex_str + "}"
+                print(f"\n--- {probing_task} | {class_name} ---")
+                print(latex_str)
     elif experiment_type == "between_layers":
         for model_name in model_names:
             for language in languages:
@@ -1172,7 +1337,7 @@ if __name__ == "__main__":
                                 model_name,
                                 language,
                                 layer_num,
-                                "standard",
+                                probing_task,
                                 probe_type,
                                 extra_iters,
                                 zeroed_out_activation_dims=zeroed_out_activation_dims,

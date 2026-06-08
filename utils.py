@@ -28,6 +28,7 @@ REVERSE_LABEL_MAP: dict[int, str] = {v: k for k, v in LABEL_MAP.items()}
 # Model constants
 MODELS_FOLDER = "models"
 MODEL_NAMES: list[str] = ["olmo_model", "tiny_aya_global"]
+MODEL_THESIS_NAMES: dict[str, str] = {"olmo_model": "olmo", "tiny_aya_global": "aya"}
 MODEL_IDS: dict[str, str] = {
     # "olmo_model": "allenai/Olmo-3-1025-7B", # This model is not instruction-tuned, so I no longer use it
     "olmo_model": "allenai/Olmo-3-7B-Instruct",  # This is the instruction-tuned version of the same Olmo model
@@ -52,9 +53,9 @@ def get_verbose_version_of_language_string(language: str):
     if "→" in language:
         languages: list[str] = language.split("→")
         if languages[0] == languages[1]:
-            return f"trained and refitted in {LANGUAGE_FULL_NAME_MAP[languages[0]]}"
+            return f"trained and tested in {LANGUAGE_FULL_NAME_MAP[languages[0]]}"
         else:
-            return f"trained in {LANGUAGE_FULL_NAME_MAP[languages[0]]}, refitted in {LANGUAGE_FULL_NAME_MAP[languages[1]]}"
+            return f"trained in {LANGUAGE_FULL_NAME_MAP[languages[0]]}, tested in {LANGUAGE_FULL_NAME_MAP[languages[1]]}"
     else:
         return LANGUAGE_FULL_NAME_MAP[language]
 
@@ -67,6 +68,11 @@ PROBES_FOLDER = "./data/probes"
 PROBE_TYPE_SUBFOLDERS: dict[str, str] = {
     "lr": "logistic_regression",
     "mm": "mass_mean",
+}
+
+PROBE_TYPE_FULL_NAME_MAP: dict[str, str] = {
+    "lr": "logistic regression",
+    "mm": "mass mean",
 }
 
 PROBING_TASKS: list[str] = ["standard", "control", "disjunct_control"]
