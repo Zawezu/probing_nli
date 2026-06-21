@@ -61,25 +61,3 @@
 
 # nltk.download()
 
-p0 = 0.2866869918699187
-p1 = 0.5685975609756098
-p2 = 0.14471544715447154
-
-# Check sum
-print("Sum:", p0 + p1 + p2)
-
-# F1 for class 1
-f1_1 = 2 * p1 / (p1 + 1)
-print("F1 for class 1:", f1_1)
-
-# Macro F1
-f1_macro = f1_1 / 3
-print("Macro F1:", f1_macro)
-
-# Micro F1
-f1_micro = p1
-print("Micro F1:", f1_micro)
-
-# Weighted F1
-f1_weighted = p1 * f1_1
-print("Weighted F1:", f1_weighted)

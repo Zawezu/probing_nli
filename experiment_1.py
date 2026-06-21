@@ -25,12 +25,20 @@ def run_full_experiment_1(
     num_layers: int | None,
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
+    force_original_labels: bool = False,
 ) -> ExperimentResult:
     """
-    Performs a full run of experiment 1
-    - Gets a probe trained on the train set
+    Perform a full run of experiment 1, iterating over all model layers.
+
+    For each layer:
+    - Gets (or trains) a probe on the train set of the given language
     - Generates predictions on the train and test sets
-    - Saves all the metrics into a ExperimentResult object
+    - Appends confusion matrices and derived metrics to the ExperimentResult
+
+    After all layers, appends cumulative and previous-layer overlapping index metrics.
+
+    Returns:
+        An ExperimentResult populated with per-layer metrics for every split.
     """
     print(
         f"Running experiment {experiment_number} instance. {language}, {probing_task}, {probe_type}, {model_name}"
@@ -44,6 +52,7 @@ def run_full_experiment_1(
         model_name,
         zeroed_out_activation_dims=zeroed_out_activation_dims,
         zeroed_out_weight_dims=zeroed_out_weight_dims,
+        force_original_labels=force_original_labels,
     )
 
     layers: list[int] = list(range(get_number_of_layers_from_file(model_name)))
@@ -56,12 +65,22 @@ def run_full_experiment_1(
 
         # Train data
         activation_dataset_train: ActivationDataset = ActivationDataset(
-            language, "train", layer_num, probing_task, model_name
+            language,
+            "train",
+            layer_num,
+            probing_task,
+            model_name,
+            force_original_labels=force_original_labels,
         )
 
         # Test data
         activation_dataset_test: ActivationDataset = ActivationDataset(
-            language, "test", layer_num, probing_task, model_name
+            language,
+            "test",
+            layer_num,
+            probing_task,
+            model_name,
+            force_original_labels=force_original_labels,
         )
 
         # Load labels for this layer (not necessary in theory, but done just in case the layer activations somehow got misaligned)
@@ -78,6 +97,7 @@ def run_full_experiment_1(
             force_probe_creation=force_probe_creation,
             zeroed_out_activation_dims=zeroed_out_activation_dims,
             zeroed_out_weight_dims=zeroed_out_weight_dims,
+            force_original_labels=force_original_labels,
         )
 
         # Get train predictions for generating the metrics
@@ -130,7 +150,18 @@ def run_experiment_1(
     num_layers: int | None = None,
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
+    force_original_labels: bool = False,
 ) -> list[ExperimentResult]:
+    """
+    Run experiment 1 for all combinations of model names and languages.
+
+    For each (model, language) pair, probes are trained for both the standard and control
+    tasks. Marginal metrics (standard minus control) are added to the standard result.
+    Results are optionally saved to disk.
+
+    Returns:
+        List of ExperimentResult objects (alternating control and standard per pair).
+    """
     exp_results: list[ExperimentResult] = []
 
     # Run the experiment for each combination of model name, language, and probing task
@@ -146,6 +177,7 @@ def run_experiment_1(
                 num_layers,
                 zeroed_out_activation_dims,
                 zeroed_out_weight_dims,
+                force_original_labels,
             )
 
             # Run full experiment on standard task
@@ -158,6 +190,7 @@ def run_experiment_1(
                 num_layers,
                 zeroed_out_activation_dims,
                 zeroed_out_weight_dims,
+                force_original_labels,
             )
 
             # Add the marginal metrics (so the difference between standard and control metrics) to the standard experiment result
@@ -208,6 +241,13 @@ if __name__ == "__main__":
         type=int,
         default=0,
     )
+    parser.add_argument(
+        "-fol",
+        help="force original (non-Japanese) labels for Japanese data",
+        nargs="?",
+        default="False",
+        const="True",
+    )
 
     args: argparse.Namespace = parser.parse_args()
     print(args)
@@ -220,6 +260,7 @@ if __name__ == "__main__":
     save_results: bool = args.sr.lower() == "true"
     zeroed_out_activation_dims: int = args.zad
     zeroed_out_weight_dims: int = args.zwd
+    force_original_labels: bool = args.fol.lower() == "true"
 
     run_experiment_1(
         languages,
@@ -232,4 +273,5 @@ if __name__ == "__main__":
         save_results=save_results,
         zeroed_out_activation_dims=zeroed_out_activation_dims,
         zeroed_out_weight_dims=zeroed_out_weight_dims,
+        force_original_labels=force_original_labels,
     )

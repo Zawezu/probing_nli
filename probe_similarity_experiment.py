@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 
-from probes import AnyProbe, load_probe
+from probes import AnyProbe, LRProbe, load_probe
 from experiment_common_code import OKABE_ITO_PALETTE
 from utils import (
     LANGUAGES,
@@ -26,13 +26,14 @@ from utils import (
 Path(PLOTS_FOLDER).mkdir(exist_ok=True)
 
 
-def get_similarity_function(probe: AnyProbe, sim_func: str):
+def get_similarity_function(probe: AnyProbe, sim_func: str, normalize_l2: bool = True):
     """
     Return the appropriate similarity function based on sim_func parameter.
 
     Args:
         probe: The AnyProbe instance
         sim_func: Either "cos_sim" or "l2_dist"
+        normalize_l2: If True, normalize probe vectors before computing L2 distance
 
     Returns:
         The corresponding method (calculate_cosine_similarity or calculate_l2_dist)
@@ -40,6 +41,10 @@ def get_similarity_function(probe: AnyProbe, sim_func: str):
     if sim_func == "cos_sim":
         return probe.calculate_cosine_similarity
     elif sim_func == "l2_dist":
+        if normalize_l2 and isinstance(probe, LRProbe):
+            return lambda other, per_class=False: probe.calculate_l2_dist(
+                other, per_class=per_class, normalize=True
+            )
         return probe.calculate_l2_dist
     elif sim_func == "maha_cos_sim":
         return probe.calculate_maha_cos_sim
@@ -49,12 +54,13 @@ def get_similarity_function(probe: AnyProbe, sim_func: str):
         )
 
 
-def get_similarity_metric_name(sim_func: str) -> str:
+def get_similarity_metric_name(sim_func: str, normalize_l2: bool = True) -> str:
     """
     Get human-readable name for the similarity metric.
 
     Args:
         sim_func: Either "cos_sim" or "l2_dist"
+        normalize_l2: If True, L2 distance label reflects normalisation
 
     Returns:
         Human-readable metric name
@@ -62,7 +68,7 @@ def get_similarity_metric_name(sim_func: str) -> str:
     if sim_func == "cos_sim":
         return "Cosine similarity"
     elif sim_func == "l2_dist":
-        return "Euclidean distance"
+        return "Normalised euclidean distance" if normalize_l2 else "Euclidean distance"
     elif sim_func == "maha_cos_sim":
         return "Mahalanobis cosine similarity"
     else:
@@ -114,6 +120,7 @@ def calculate_per_layer_sims_between_langs(
     probe_type: str = "lr",
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
+    normalize_l2: bool = True,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
@@ -144,7 +151,7 @@ def calculate_per_layer_sims_between_langs(
                 zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
-            sim_method = get_similarity_function(probe_a, sim_func)
+            sim_method = get_similarity_function(probe_a, sim_func, normalize_l2)
             sims_dict: dict[int, float] = sim_method(probe_b, per_class=per_class)
 
             # Initialize class keys if needed
@@ -174,12 +181,11 @@ def calculate_per_layer_sims_over_extra_iters(
     probe_type: str = "lr",
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
+    normalize_l2: bool = True,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
-    num_layers: int = get_number_of_layers_from_file(
-        "olmo_model"
-    )  # TODO change this to model_name
+    num_layers: int = get_number_of_layers_from_file(model_name)
 
     for layer_num in range(num_layers):
         sims[layer_num] = {}
@@ -211,7 +217,7 @@ def calculate_per_layer_sims_over_extra_iters(
                 zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
-            sim_method = get_similarity_function(original_probe, sim_func)
+            sim_method = get_similarity_function(original_probe, sim_func, normalize_l2)
             sims_dict: dict[int, float] = sim_method(
                 refitted_probe, per_class=per_class
             )
@@ -238,7 +244,7 @@ def get_filepath(title) -> Path:
         folder = "per_extra_iter"
     elif "over_layers" in clean_title or "comparison" in clean_title:
         folder = "per_layers"
-    elif "over_extra_iters" in clean_title:
+    elif "over_extra_iters" in clean_title or "_after_" in clean_title:
         folder = "per_extra_iter"
     else:
         folder = "."
@@ -320,6 +326,7 @@ def plot_sim_confusion_matrix(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
+    normalize_l2: bool = True,
 ) -> None:
     """
     Plot confusion matrix(ces) of similarities between language pairs.
@@ -358,7 +365,7 @@ def plot_sim_confusion_matrix(
 
         # Plot
         ax = axes[idx]
-        metric_name = get_similarity_metric_name(sim_func)
+        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
         sns.heatmap(
             matrix,
             xticklabels=languages,  # type: ignore
@@ -398,6 +405,7 @@ def plot_sim_over_the_layers(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
+    normalize_l2: bool = True,
 ) -> None:
     """
     Plot similarity over layers for each language pair.
@@ -456,7 +464,7 @@ def plot_sim_over_the_layers(
             )
 
         ax.set_xlabel("Layer")
-        metric_name = get_similarity_metric_name(sim_func)
+        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
         ax.set_ylabel(metric_name)
         ax.set_title(f"{lang_a}, {lang_b}")
         ax.grid(True, alpha=0.3)
@@ -496,6 +504,7 @@ def calculate_between_layers_sims(
     probe_type: str = "lr",
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
+    normalize_l2: bool = True,
 ) -> dict[int, dict[str, float]]:
     """
     Calculate similarities between probes at each pair of layers for a single language.
@@ -522,7 +531,9 @@ def calculate_between_layers_sims(
         for layer_b in range(num_layers):
             if layer_a == layer_b:
                 continue
-            sim_method = get_similarity_function(probes[layer_a], sim_func)
+            sim_method = get_similarity_function(
+                probes[layer_a], sim_func, normalize_l2
+            )
             sims_dict: dict[int, float] = sim_method(
                 probes[layer_b], per_class=per_class
             )
@@ -543,6 +554,7 @@ def plot_between_layers_confusion_matrix(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
+    normalize_l2: bool = True,
 ) -> None:
     class_nums = sorted(sims.keys())
     num_classes = len(class_nums)
@@ -567,7 +579,7 @@ def plot_between_layers_confusion_matrix(
             matrix[layer_to_idx[int(layer_a)], layer_to_idx[int(layer_b)]] = value
 
         ax = axes[idx]
-        metric_name = get_similarity_metric_name(sim_func)
+        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
         layer_labels = [str(layer) for layer in layers]
         has_negatives = vmin < 0.0
         heatmap_kwargs: dict = dict(
@@ -603,23 +615,27 @@ def plot_between_layers_confusion_matrix(
     plt.close()
 
 
-def plot_sim_over_the_layers_three_metrics(
-    sims_cos: dict,
-    sims_l2: dict,
-    sims_maha: dict,
+def plot_sim_over_the_layers_two_metrics(
+    tasks_data: dict[str, tuple[dict, dict]],
     language_pairs: list[tuple[str, str]],
     title: str,
     save: bool,
     show: bool,
     per_class: bool,
+    filename=None,
+    normalize_l2: bool = True,
 ) -> None:
     """
-    Plot cosine similarity, Mahalanobis cosine similarity, and L2 distance over layers.
+    Plot cosine similarity and L2 distance over layers for one or more probing tasks.
     Each subplot has two y-axes:
-      - Left [0, 1]: cosine similarity (blue, solid) and Mahalanobis cosine (green, dotted)
-      - Right (dynamic): L2 distance (magenta, dashed)
-    Each class gets its own shade within each metric's color family.
+      - Left [0, 1]: cosine similarity (blue shades)
+      - Right (dynamic): L2 distance (pink shades)
+    Standard tasks use linestyle="-"; tasks whose name contains "control" use linestyle="--"
+    with the same colors as the standard task.
+    tasks_data: {task_name: (sims_cos, sims_l2)}
     """
+    if filename is None:
+        filename = title
     n_pairs: int = len(language_pairs)
     n_cols: int = min(3, n_pairs)
     n_rows: int = (n_pairs + n_cols - 1) // n_cols
@@ -633,12 +649,22 @@ def plot_sim_over_the_layers_three_metrics(
     elif n_rows == 1 or n_cols == 1:
         axes = axes.reshape(n_rows, n_cols)
 
-    layers: list[int] = sorted(sims_cos.keys())
-    class_nums: list[int] = sorted(sims_cos[layers[0]].keys())
+    first_sims_cos = next(iter(tasks_data.values()))[0]
+    layers: list[int] = sorted(first_sims_cos.keys())
+    class_nums: list[int] = sorted(first_sims_cos[layers[0]].keys())
     n_classes: int = len(class_nums)
     cos_colors = matplotlib.colormaps["Blues"](np.linspace(0.45, 0.9, n_classes))  # type: ignore[attr-defined]
-    maha_colors = matplotlib.colormaps["Greens"](np.linspace(0.45, 0.9, n_classes))  # type: ignore[attr-defined]
     l2_colors = matplotlib.colormaps["RdPu"](np.linspace(0.45, 0.9, n_classes))  # type: ignore[attr-defined]
+
+    def _grey_out(rgba, amount: float = 0.45):
+        r, g, b, a = rgba
+        grey = 0.55
+        return (
+            r * (1 - amount) + grey * amount,
+            g * (1 - amount) + grey * amount,
+            b * (1 - amount) + grey * amount,
+            a,
+        )
 
     for idx, (lang_a, lang_b) in enumerate(language_pairs):
         row: int = idx // n_cols
@@ -648,60 +674,56 @@ def plot_sim_over_the_layers_three_metrics(
 
         pair_key: str = f"{lang_a},{lang_b}"
 
-        for i, class_num in enumerate(class_nums):
-            class_name = get_class_name(class_num, per_class)
+        for task_name, (sims_cos, sims_l2) in tasks_data.items():
+            is_control = "control" in task_name.lower()
+            linestyle = "--" if is_control else "-"
 
-            cos_vals: list[float] = [
-                sims_cos[layer][class_num][pair_key] for layer in layers
-            ]
-            maha_vals: list[float] = [
-                sims_maha[layer][class_num][pair_key] for layer in layers
-            ]
-            l2_vals: list[float] = [
-                sims_l2[layer][class_num][pair_key] for layer in layers
-            ]
+            for i, class_num in enumerate(class_nums):
+                cos_vals: list[float] = [
+                    sims_cos[layer][class_num][pair_key] for layer in layers
+                ]
+                l2_vals: list[float] = [
+                    sims_l2[layer][class_num][pair_key] for layer in layers
+                ]
 
-            ax1.plot(
-                layers,
-                cos_vals,
-                marker="o",
-                linewidth=2,
-                markersize=5,
-                linestyle="-",
-                color=cos_colors[i],
-                label=f"Cos ({class_name.capitalize()})",
-            )
-            ax1.plot(
-                layers,
-                maha_vals,
-                marker="^",
-                linewidth=2,
-                markersize=5,
-                linestyle=":",
-                color=maha_colors[i],
-                label=f"Maha cos ({class_name.capitalize()})",
-            )
-            ax2.plot(
-                layers,
-                l2_vals,
-                marker="s",
-                linewidth=2,
-                markersize=5,
-                linestyle="--",
-                color=l2_colors[i],
-                label=f"L2 ({class_name.capitalize()})",
-            )
+                cos_color = _grey_out(cos_colors[i]) if is_control else cos_colors[i]
+                l2_color = _grey_out(l2_colors[i]) if is_control else l2_colors[i]
+
+                ax1.plot(
+                    layers,
+                    cos_vals,
+                    linewidth=3,
+                    markersize=5,
+                    linestyle=linestyle,
+                    color=cos_color,
+                    label=f"Cosine similarity ({task_name})",
+                )
+                ax2.plot(
+                    layers,
+                    l2_vals,
+                    linewidth=3,
+                    markersize=5,
+                    linestyle=linestyle,
+                    color=l2_color,
+                    label=f"{get_similarity_metric_name('l2_dist', normalize_l2)} ({task_name})",
+                )
 
         ax1.set_xlabel("Layer")
         ax1.set_ylabel("Cosine similarity")
         ax1.set_ylim(0.0, 1.0)
-        ax2.set_ylabel("Euclidean distance")
-        ax1.set_title(f"{lang_a}, {lang_b}")
+        ax2.set_ylabel(get_similarity_metric_name("l2_dist", normalize_l2))
+        ax1.set_title(f"{lang_a}, {lang_b}", fontsize=14)
         ax1.grid(True, alpha=0.3)
 
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=7)
+        ax1.legend(
+            lines1 + lines2,
+            labels1 + labels2,
+            fontsize=7,
+            loc="upper left",
+            handlelength=4,
+        )
 
     for idx in range(n_pairs, n_rows * n_cols):
         row = idx // n_cols
@@ -712,7 +734,7 @@ def plot_sim_over_the_layers_three_metrics(
     plt.tight_layout()
 
     if save:
-        filepath: Path = get_filepath(title)
+        filepath: Path = get_filepath(filename)
         plt.savefig(filepath, dpi=100, bbox_inches="tight")
 
     if show:
@@ -731,6 +753,7 @@ def plot_sim_over_extra_iters(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
+    normalize_l2: bool = True,
 ) -> None:
     num_layers: int = len(layer_nums_to_plot)
     n_cols: int = min(3, num_layers)  # Use up to 3 columns
@@ -775,7 +798,7 @@ def plot_sim_over_extra_iters(
             )
 
         ax.set_xlabel("Extra iters", fontsize=8)
-        metric_name = get_similarity_metric_name(sim_func)
+        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
         ax.set_ylabel(metric_name)
         ax.set_title(f"Layer {layer_num}", fontsize=8)
         ax.grid(True, alpha=0.3)
@@ -813,6 +836,8 @@ def plot_sim_over_layers_at_max_iters(
     per_language_pair: bool,
     vmin: float = 0.0,
     vmax: float = 1.0,
+    normalize_l2: bool = True,
+    filename=None,
 ) -> None:
     """
     Plot similarity at max extra iters over layers.
@@ -820,6 +845,8 @@ def plot_sim_over_layers_at_max_iters(
     If per_language_pair: grid of subplots (one per model), one line per language pair.
     Otherwise: single plot, one line per model labeled with its thesis name.
     """
+    if filename is None:
+        filename = title
     model_names_in_plot = list(sims_per_model_per_pair.keys())
     n_models = len(model_names_in_plot)
 
@@ -827,11 +854,16 @@ def plot_sim_over_layers_at_max_iters(
     first_pair_sims = next(iter(first_model_sims.values()))
     layers: list[int] = sorted(first_pair_sims.keys())
     lang_pair_strs: list[str] = list(first_model_sims.keys())
-    metric_name = get_similarity_metric_name(sim_func)
+    metric_name = get_similarity_metric_name(sim_func, normalize_l2)
 
     if per_language_pair:
-        n_cols: int = math.ceil(math.sqrt(n_models))
-        n_rows: int = math.ceil(n_models / n_cols)
+        # Place exactly 3 plots in a single row; otherwise approximate a square.
+        if n_models == 3:
+            n_cols: int = 3
+            n_rows: int = 1
+        else:
+            n_cols = math.ceil(math.sqrt(n_models))
+            n_rows = math.ceil(n_models / n_cols)
         fig, axes = plt.subplots(
             n_rows, n_cols, figsize=(7 * n_cols, 4 * n_rows), squeeze=False
         )
@@ -902,7 +934,7 @@ def plot_sim_over_layers_at_max_iters(
     plt.tight_layout()
 
     if save:
-        filepath: Path = get_filepath(title)
+        filepath: Path = get_filepath(filename)
         plt.savefig(filepath, dpi=100, bbox_inches="tight")
 
     if show:
@@ -929,7 +961,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-e",
-        help="enter the experiment to perform: per_layer, per_layer_three_metrics, per_extra_iter, between_layers, or weight_magnitudes",
+        help="enter the experiment to perform: per_layer, per_layer_two_metrics, per_extra_iter, between_layers, or weight_magnitudes",
         default="",
     )
 
@@ -990,6 +1022,15 @@ if __name__ == "__main__":
         type=int,
         default=0,
     )
+    parser.add_argument(
+        "-n",
+        help="whether to normalise L2 distance (only applies to lr probes)",
+        nargs="?",
+        default="True",
+        const="True",
+    )
+    parser.add_argument("-nr", help="number of refits", type=int, default=1)
+    parser.add_argument("-ir", help="iterations per refit", type=int, default=2)
 
     args: argparse.Namespace = parser.parse_args()
     print(args)
@@ -1007,6 +1048,7 @@ if __name__ == "__main__":
     probe_type: str = args.pt
     zeroed_out_activation_dims: int = args.zad
     zeroed_out_weight_dims: int = args.zwd
+    normalize_l2: bool = args.n.lower() == "true" and probe_type == "lr"
 
     zeroing_suffix: str = ""
     if zeroed_out_activation_dims:
@@ -1016,10 +1058,10 @@ if __name__ == "__main__":
 
     if extra_iter_nums != [0] and experiment_type not in (
         "per_layer",
-        "per_layer_three_metrics",
+        "per_layer_two_metrics",
     ):
         raise ValueError(
-            "ei can only be specified if the experiment type is per_layer or per_layer_three_metrics"
+            "ei can only be specified if the experiment type is per_layer or per_layer_two_metrics"
         )
 
     if experiment_type == "per_layer":
@@ -1051,12 +1093,15 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
+                            normalize_l2=normalize_l2,
                         )
                     )
 
                     print(sims)
 
-                    metric_name: str = get_similarity_metric_name(sim_func)
+                    metric_name: str = get_similarity_metric_name(
+                        sim_func, normalize_l2
+                    )
 
                     if sim_func == "cos_sim" or sim_func == "maha_cos_sim":
                         # vmin, vmax = 0.0, 1.0
@@ -1098,29 +1143,31 @@ if __name__ == "__main__":
                         sim_func,
                         vmin=vmin,
                         vmax=vmax,
+                        normalize_l2=normalize_l2,
                     )
-    elif experiment_type == "per_layer_three_metrics":
+    elif experiment_type == "per_layer_two_metrics":
         if "-sf" in sys.argv:
             print(
-                "Warning: -sf argument is not used in per_layer_three_metrics experiment "
+                "Warning: -sf argument is not used in per_layer_two_metrics experiment "
                 "and will be ignored. Both cos_sim and l2_dist are always computed."
             )
 
         for model_name in model_names:
-            for probing_task in probing_tasks:
-                for extra_iters in extra_iter_nums:
-                    if extra_iters == 0:
-                        languages_to_calculate: list[str] = languages
-                    else:
-                        languages_to_calculate = [
-                            get_language_merged_string(lp)
-                            for lp in get_language_pair_permutations(languages)
-                        ]
+            for extra_iters in extra_iter_nums:
+                if extra_iters == 0:
+                    languages_to_calculate: list[str] = languages
+                else:
+                    languages_to_calculate = [
+                        get_language_merged_string(lp)
+                        for lp in get_language_pair_permutations(languages)
+                    ]
 
-                    language_pairs: list[tuple[str, str]] = (
-                        get_language_pair_combinations(languages_to_calculate)
-                    )
+                language_pairs: list[tuple[str, str]] = get_language_pair_combinations(
+                    languages_to_calculate
+                )
 
+                tasks_data: dict[str, tuple[dict, dict]] = {}
+                for probing_task in probing_tasks:
                     sims_cos: dict[int, dict[int, dict[Any, float]]] = (
                         calculate_per_layer_sims_between_langs(
                             model_name,
@@ -1147,38 +1194,26 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
+                            normalize_l2=normalize_l2,
                         )
                     )
-                    sims_maha: dict[int, dict[int, dict[Any, float]]] = (
-                        calculate_per_layer_sims_between_langs(
-                            model_name,
-                            probing_task,
-                            languages_to_calculate,
-                            extra_prints,
-                            per_class,
-                            sim_func="maha_cos_sim",
-                            extra_iters=extra_iters,
-                            probe_type=probe_type,
-                            zeroed_out_activation_dims=zeroed_out_activation_dims,
-                            zeroed_out_weight_dims=zeroed_out_weight_dims,
-                        )
-                    )
+                    tasks_data[probing_task] = (sims_cos, sims_l2)
 
-                    plot_sim_over_the_layers_three_metrics(
-                        sims_cos,
-                        sims_l2,
-                        sims_maha,
-                        language_pairs,
-                        f"Cosine, Mahalanobis cosine, and Euclidean distance over layers for {model_name} {probing_task} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
-                        save,
-                        show,
-                        per_class,
-                    )
+                plot_sim_over_the_layers_two_metrics(
+                    tasks_data,
+                    language_pairs,
+                    "",
+                    save,
+                    show,
+                    per_class,
+                    filename=f"per_layer_exp_{model_name}",
+                    normalize_l2=normalize_l2,
+                )
     elif experiment_type == "per_extra_iter":
         import pandas as pd
 
-        num_refits = 2
-        iterations_per_refit = 1000
+        num_refits = args.nr
+        iterations_per_refit = args.ir
         for probing_task in probing_tasks:
             language_pairs: list[tuple[str, str]] = get_language_pair_permutations(
                 languages
@@ -1207,6 +1242,7 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
+                            normalize_l2=normalize_l2,
                         )
                     )
 
@@ -1217,7 +1253,7 @@ if __name__ == "__main__":
                     else:
                         raise ValueError(f"Unknown sim_func ({sim_func})")
 
-                    metric_name = get_similarity_metric_name(sim_func)
+                    metric_name = get_similarity_metric_name(sim_func, normalize_l2)
                     layer_nums_to_plot: list[int] = list(sims.keys())[::4]
                     # if save or show:
                     #     plot_sim_over_extra_iters(
@@ -1253,15 +1289,18 @@ if __name__ == "__main__":
             if sims_per_model_per_pair and (save or show):
                 max_extra_iters = num_refits * iterations_per_refit
 
-                metric_name_new = get_similarity_metric_name(sim_func)
+                metric_name_new = get_similarity_metric_name(sim_func, normalize_l2)
                 plot_sim_over_layers_at_max_iters(
                     sims_per_model_per_pair,
                     max_extra_iters,
-                    f"{metric_name_new} after {max_extra_iters} iters over layers for {probing_task} {probe_type} probes with per_class={per_class}{zeroing_suffix}",
+                    # f"{metric_name_new} after {max_extra_iters} iters over layers for {probing_task} {PROBE_TYPE_FULL_NAME_MAP[probe_type]} probes{f' with per_class=True{zeroing_suffix}' if per_class else ''}",
+                    "",
                     save,
                     show,
                     sim_func,
+                    filename=f"cos_sims_after_{max_extra_iters}_iters",
                     per_language_pair=False,
+                    normalize_l2=normalize_l2,
                 )
 
             # Build and print one DataFrame per class
@@ -1298,10 +1337,11 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
+                            normalize_l2=normalize_l2,
                         )
                     )
 
-                    metric_name = get_similarity_metric_name(sim_func)
+                    metric_name = get_similarity_metric_name(sim_func, normalize_l2)
 
                     all_values: list[float] = [
                         v for d in sims_between.values() for v in d.values()
@@ -1325,6 +1365,7 @@ if __name__ == "__main__":
                         sim_func,
                         vmin=vmin,
                         vmax=vmax,
+                        normalize_l2=normalize_l2,
                     )
     elif experiment_type == "weight_magnitudes":
         for language in languages:
@@ -1345,5 +1386,5 @@ if __name__ == "__main__":
                             )
     else:
         raise ValueError(
-            f"{experiment_type} invalid. exp must be per_layer, per_layer_three_metrics, per_extra_iter, or between_layers."
+            f"{experiment_type} invalid. exp must be per_layer, per_layer_two_metrics, per_extra_iter, or between_layers."
         )

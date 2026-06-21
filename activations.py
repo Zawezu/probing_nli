@@ -32,6 +32,13 @@ class SpecialCase:
         start_from_batch: int | None,
         end_at_batch: int | None = None,
     ) -> None:
+        """
+        Args:
+            language: Language code (e.g. 'en', 'jp').
+            split: Dataset split (e.g. 'train', 'test').
+            start_from_batch: First batch to generate; None means skip this split entirely.
+            end_at_batch: Stop before this batch (exclusive); None means no early stop.
+        """
         self.language: str = language
         self.split: str = split
         self.start_from_batch: int | None = start_from_batch
@@ -43,6 +50,12 @@ class SpecialCase:
 
 class ActivationRecorder:
     def __init__(self, model_name, tokenizer=None, hf_model=None) -> None:
+        """
+        Args:
+            model_name: Key used to locate the model on disk and construct file paths.
+            tokenizer: Pre-loaded HuggingFace tokenizer; loaded lazily if None.
+            hf_model: Pre-loaded HuggingFace causal LM; loaded lazily if None.
+        """
         self.activations: dict[str, t.Tensor] = {}
         self.model_name: str = model_name
 
@@ -50,6 +63,12 @@ class ActivationRecorder:
         self.hf_model = hf_model
 
     def get_activation(self, name):
+        """Return a forward hook that stores the output of a layer under `name`.
+
+        Only the first forward pass is recorded; subsequent calls are ignored so
+        that activations from the generation step (beyond the prompt) are excluded.
+        """
+
         def hook(model, input, output) -> None:
             # We only record the activations if the dictionary does not have an entry for them
             # This ensures that the only activations recorded are those for the first forward pass
@@ -108,6 +127,11 @@ class ActivationRecorder:
         split: str,
         batch_id: int,
     ) -> None:
+        """Serialize one batch of model responses to a JSON file.
+
+        Each record contains the full message list, the decoded response string,
+        and the original SICK pair ID so responses can be re-aligned later.
+        """
         assert (
             len(messages_batch) == len(responses) == len(original_ids)
         ), "Cannot save batch responses. The lengths of the lists do not match."
@@ -144,12 +168,21 @@ class ActivationRecorder:
         end_at_batch: int | None = None,
     ) -> None:
         """
-        Iterate through `dataloader` in batches, processing all sentences in each batch together.
-        `start_from_batch` can be used to skip the first N batches so that you can resume
-        after a crash.
+        Run the model on the SICK dataset and record per-layer activations (last token).
 
-        `amount_of_batches_to_generate` limits the number of batches produced *after* the start
-        index.
+        For each batch the model generates a short response; activations are captured via
+        forward hooks and the last token position is extracted. Results are saved to disk
+        asynchronously in a thread pool.
+
+        Args:
+            language: Language code (e.g. 'en', 'jp').
+            split: Dataset split ('train', 'test', or 'val').
+            save_to_disk: If True, persist activations and responses to disk.
+            amount_of_batches_to_generate: Cap on batches produced after `start_from_batch`;
+                None means no cap.
+            batch_size: Number of samples per batch fed to the DataLoader.
+            start_from_batch: Skip batches before this index, allowing crash recovery.
+            end_at_batch: Stop before this batch index (exclusive); None means run to the end.
         """
         if self.tokenizer is None or self.hf_model is None:
             print(
@@ -281,6 +314,12 @@ class ActivationRecorder:
             save_executor.shutdown(wait=True)
 
     def load_model(self) -> None:
+        """Load the tokenizer and model from a local directory.
+
+        Applies the chat template stored in CHAT_TEMPLATES, sets padding to the
+        left side, and writes the layer count to a text file so it can be read
+        without loading the model again later.
+        """
         model_filepath: str = f"{MODELS_FOLDER}/{self.model_name}"
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_filepath, local_files_only=True
@@ -304,6 +343,12 @@ class ActivationRecorder:
             file.write(str(len(self.hf_model.model.layers)))
 
     def get_number_of_layers(self) -> int:
+        """Return the number of transformer layers in the model.
+
+        Reads directly from the loaded model if available; otherwise falls back to
+        the cached text file written during `load_model`. Loads the model as a last
+        resort if the file is missing.
+        """
         if self.hf_model is not None:
             return len(self.hf_model.model.layers)
         else:
@@ -319,6 +364,10 @@ class ActivationRecorder:
 
     @staticmethod
     def generate_prompt(sent_a, sent_b, language) -> str:
+        """Format a premise/hypothesis pair as an NLI prompt in the given language.
+
+        Supported languages: 'en', 'es', 'jp', 'nl'. Raises KeyError for others.
+        """
         match language:
             case "en":
                 return f"Premise: {sent_a}\nHypothesis: {sent_b}\nClassification: "
@@ -335,6 +384,17 @@ class ActivationRecorder:
     def generate_messages_batch(
         sentence_tuple_batch, language: str, few_shot: bool = False
     ) -> list[list[dict]]:
+        """Build a batch of chat-formatted messages for NLI classification.
+
+        Args:
+            sentence_tuple_batch: A tuple of (sentence_A_list, sentence_B_list) as
+                returned by the DataLoader.
+            language: Language code used to select the system prompt and prompt template.
+            few_shot: If True, prepend a single in-context example before the user prompt.
+
+        Returns:
+            A list of message lists, each compatible with the tokenizer's chat template.
+        """
         system_prompt = SYSTEM_PROMPTS[language]
 
         prompts: list[str] = [
@@ -373,6 +433,12 @@ class ActivationRecorder:
         batch_size: int,
         special_cases: list[SpecialCase] = [],
     ) -> None:
+        """Generate activations for all requested language/split combinations.
+
+        Iterates over every (language, split) pair and calls `generate_activations`.
+        `special_cases` can override the start/end batch for specific pairs or skip
+        them entirely (when `SpecialCase.start_from_batch` is None).
+        """
         for language in languages_to_generate:
             for split in splits_to_generate:
                 print(
@@ -424,13 +490,33 @@ class ActivationDataset(Dataset):
         layer_num: int,
         probing_task: str,
         model_name: str,
+        force_original_labels: bool = False,
     ) -> None:
+        """
+        PyTorch Dataset that pairs pre-computed activations with SICK labels.
+
+        Activations are read from the merged `.pt` file for the given model/language/
+        split/layer. Labels are drawn from the corresponding SICKMergedDataset using
+        the requested probing task ('standard', 'control', etc.).
+
+        Args:
+            language: Language code (e.g. 'en', 'jp').
+            split: Dataset split ('train', 'test', or 'val').
+            layer_num: Transformer layer whose activations to load.
+            probing_task: Label column to use (e.g. 'standard', 'control').
+            model_name: Name of the model whose activations to load.
+            force_original_labels: If True and language is 'jp', use the original
+                English-aligned labels instead of the Japanese-specific labels.
+        """
         self.language: str = language
         self.split: str = split
         self.layer_num: int = layer_num
         self.probing_task: str = probing_task
         self.model_name: str = model_name
-        self.original_dataset: SICKMergedDataset = SICKMergedDataset(language, split)
+        self.force_original_labels: bool = force_original_labels
+        self.original_dataset: SICKMergedDataset = SICKMergedDataset(
+            language, split, force_original_labels=force_original_labels
+        )
 
         self.activations, self.labels = self.load_activations_from_merged()
 
@@ -445,7 +531,7 @@ class ActivationDataset(Dataset):
         Load activations and labels from a merged activation file.
         """
         original_dataset: SICKMergedDataset = SICKMergedDataset(
-            self.language, self.split
+            self.language, self.split, force_original_labels=self.force_original_labels
         )
 
         # Load merged activation file
@@ -477,6 +563,15 @@ def get_activations_filepath(
     layer_num: int | str | None,
     batch_id: int | str | None,
 ) -> str:
+    """Return the file path for an activation file.
+
+    Path format depends on which arguments are provided:
+      - layer_num and batch_id both given: path to a single batch file.
+      - layer_num given, batch_id None: directory prefix for that layer (used to
+        build the merged-file path by appending '_merged.pt').
+      - Both None: directory for the model/language/split combination.
+      - layer_num None, batch_id given: invalid; raises KeyError.
+    """
     if layer_num is not None and batch_id is not None:
         # if type(batch_id) == int:
         if isinstance(batch_id, int):
@@ -498,10 +593,16 @@ def get_responses_filepath(
     split: str,
     batch_id: int | str,
 ) -> str:
+    """Return the file path for a batch of saved model responses."""
     return f"./data/responses/{model_name}/{language}/{split}/responses_batch{batch_id}.json"
 
 
 def delete_individual_file(filepath, ignore_substring, actually_delete) -> None:
+    """Delete (or dry-run delete) a single file.
+
+    Skips the file if `ignore_substring` is non-empty and appears in the filename.
+    When `actually_delete` is False, only prints what would be deleted.
+    """
     # print(filepath.name)
     if not (ignore_substring and ignore_substring in filepath.name):
         if actually_delete:
@@ -570,6 +671,15 @@ def delete_activations_file(
 def merge_activation_batches(
     model_name: str, language: str, split: str, layer_num: int | str
 ) -> str:
+    """Concatenate all batch activation files for one layer into a single merged file.
+
+    Batch files are discovered via the pattern `layer{layer_num}_batch*.pt` and sorted
+    numerically. The resulting tensor is saved as `layer{layer_num}_merged.pt` alongside
+    the batch files.
+
+    Returns:
+        Path to the merged file.
+    """
     # Get the directory containing batch files
     directory = Path(f"{ACTIVATIONS_FOLDER}/{model_name}/{language}/{split}")
 
@@ -620,6 +730,14 @@ def merge_activation_batches(
 
 
 def merge_response_batches(model_name: str, language: str, split: str) -> str:
+    """Concatenate all per-batch response JSON files into a single merged JSON file.
+
+    Batch files are discovered via `responses_batch*.json` and sorted numerically.
+    The merged file is saved as `responses_merged.json` in the same directory.
+
+    Returns:
+        Path to the merged file.
+    """
     directory = Path(f"./data/responses/{model_name}/{language}/{split}")
 
     if not directory.exists():
@@ -694,15 +812,6 @@ if __name__ == "__main__":
 
     special_cases: list[SpecialCase] = []
 
-    if model_name == "olmo_model":
-        special_cases.extend(
-            [
-                SpecialCase("nl", "test", 0, end_at_batch=14),
-                SpecialCase("nl", "val", None),
-                SpecialCase("nl", "train", None),
-            ]
-        )
-
     activation_recorder.generate_all_activations(
         languages_to_generate,
         splits_to_generate,
@@ -711,3 +820,6 @@ if __name__ == "__main__":
         batch_size,
         special_cases=special_cases,
     )
+
+    # activation_recorder.load_model()
+    # print(activation_recorder.hf_model.model.layers)

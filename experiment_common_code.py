@@ -41,7 +41,15 @@ class ExperimentResult:
         extra_iter_num: int = 0,
         zeroed_out_activation_dims: int = 0,
         zeroed_out_weight_dims: int = 0,
+        force_original_labels: bool = False,
     ) -> None:
+        """
+        Initialize an ExperimentResult with experiment metadata and empty metrics storage.
+
+        Sets self.splits based on experiment_number:
+        - 1 or 3: ["train", "test"]
+        - 2: ["train_a", "test_a", "train_b", "test_b"]
+        """
         self.experiment_number: int = experiment_number
         self.language: str = language
         self.probing_task: str = probing_task
@@ -50,6 +58,7 @@ class ExperimentResult:
         self.extra_iter_num: int = extra_iter_num
         self.zeroed_out_activation_dims: int = zeroed_out_activation_dims
         self.zeroed_out_weight_dims: int = zeroed_out_weight_dims
+        self.force_original_labels: bool = force_original_labels
 
         match experiment_number:
             case 1 | 3:
@@ -62,6 +71,7 @@ class ExperimentResult:
         self.metrics: dict[str, dict[str, Any]] = {split: {} for split in self.splits}
 
     def append_metric(self, split: str, metric: str, value: Any) -> None:
+        """Append value to the metric list for the given split, creating the list if absent."""
         # print(f"Appending {value}")
         try:
             self.metrics[split][metric].append(value)
@@ -75,6 +85,12 @@ class ExperimentResult:
         layer_num: int | None = None,
         cls: str | None = None,
     ) -> Any:
+        """
+        Retrieve metric values for the given split.
+
+        If layer_num is None, returns the full list across layers; otherwise returns the
+        value at that index. If cls is provided, indexes into a per-class dict at that layer.
+        """
         if layer_num is None:
             if cls is None:
                 return self.metrics[split][metric]
@@ -88,24 +104,22 @@ class ExperimentResult:
 
     def add_metrics_from_confusion_matrix(self, include_unknown=False) -> None:
         """
-        Calculate and add overall and per-class metrics to an ExperimentResult object
-        based on confusion matrices already stored in the result.
+        Calculate and add overall and per-class metrics based on the most recently
+        appended confusion matrix for each split.
 
-        Adds the following metrics to result.metrics[split]:
-        - accuracy: Overall accuracy (float)
-        - precision: Overall precision (macro average, float)
-        - recall: Overall recall (macro average, float)
-        - f1: Overall F1 score (macro average, float)
-        - per_class_precision: List of per-class precision scores with label keys
-        - per_class_recall: List of per-class recall scores with label keys
-        - per_class_f1: List of per-class F1 scores with label keys
+        Adds the following metrics to self.metrics[split] (with an "_including_unk"
+        suffix when include_unknown=True):
+        - accuracy: overall accuracy (float)
+        - precision, recall, f1: macro-averaged over supported classes (float)
+        - per_class_precision, per_class_recall, per_class_f1: dict keyed by str label value
 
-        Label keys depend on confusion matrix shape:
-        - 3x3 matrix: keys are ["0", "1", "2"] (LABEL_MAP values)
-        - 4x4 matrix: keys are ["-1", "0", "1", "2"] (including unknown label)
+        Label keys depend on the confusion matrix shape after optional truncation:
+        - 3x3 matrix (or 4x4 with include_unknown=False): keys are ["0", "1", "2"]
+        - 4x4 matrix with include_unknown=True: keys are ["-1", "0", "1", "2"]
 
         Args:
-            result: ExperimentResult object with confusion matrices stored in metrics["train"]["cm"] and metrics["test"]["cm"]
+            include_unknown: If True, retain the -1 "unknown" row/column in 4x4 matrices
+                and append metrics with the "_including_unk" suffix. Defaults to False.
         """
         for split in self.splits:
             # Take the confusion matrix at the latest layer that has been recorded
@@ -207,6 +221,16 @@ class ExperimentResult:
             )
 
     def add_marginal_metrics(self, control_exp_result: "ExperimentResult") -> None:
+        """
+        Add marginal (standard minus control) versions of all scalar and per-class metrics.
+
+        For each layer, computes the per-layer difference between this result's metrics and
+        the control result's, storing them with a "marginal_" prefix. Only valid for
+        non-control results paired with 3x3 confusion matrices (experiments 1 and 2).
+
+        Args:
+            control_exp_result: An ExperimentResult whose probing_task contains "control".
+        """
         assert (
             "control" not in self.probing_task
         ), "add_difference_with_control_metrics() cannot be used on a control experiment result"
@@ -305,6 +329,12 @@ class ExperimentResult:
         )
 
     def add_idxs_per_cm_cell_metric(self, split, real_labels, preds) -> None:
+        """
+        Record which sample indices fell in each confusion matrix cell for the given split.
+
+        Stores a dict keyed by "real:{true_label},pred:{pred_label}" mapping to a set of
+        sample indices, appended as the "idxs_per_cm_cell" metric.
+        """
         idxs_per_cm_cell: defaultdict[str, set[int]] = defaultdict(set)
 
         for idx in range(len(real_labels)):
@@ -323,6 +353,15 @@ class ExperimentResult:
         self.append_metric(split, "idxs_per_cm_cell", dict(idxs_per_cm_cell))
 
     def add_overlapping_idxs_metric(self, cummulative) -> None:
+        """
+        Track which samples maintain the same classification across consecutive layers.
+
+        If cummulative=True, retains only the indices that had the same classification
+        in ALL layers up to the current one. If cummulative=False, compares only against
+        the immediately preceding layer. Appends "{prefix}_overlapping_idxs" and
+        "{prefix}_overlapping_idx_amounts" metrics, where prefix is "cummulative" or
+        "previous_layer". The first layer's entry is a placeholder with amounts=0.
+        """
         for split in self.splits:
             idxs_per_cm_cell = self.get_metric(split, "idxs_per_cm_cell")
 
@@ -382,13 +421,10 @@ class ExperimentResult:
 
     def save_to_file(self) -> str:
         """
-        Save the ExperimentResult to a pickle file.
-
-        Args:
-            base_dir: Base directory where results will be saved (default: "./{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}")
+        Pickle the ExperimentResult to the default results directory.
 
         Returns:
-            The path to the saved file
+            The path to the saved file.
         """
         save_dir = Path(
             f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{self.experiment_number}"
@@ -403,6 +439,7 @@ class ExperimentResult:
             self.extra_iter_num,
             self.zeroed_out_activation_dims,
             self.zeroed_out_weight_dims,
+            self.force_original_labels,
         )
         with open(filepath, "wb") as f:
             pickle.dump(self, f)
@@ -410,11 +447,13 @@ class ExperimentResult:
         return str(filepath)
 
     def get_name(self) -> str:
+        """Return a space-separated string of the key experiment identifiers."""
         return (
             f"{self.language} {self.probing_task} {self.probe_type} {self.model_name}"
         )
 
     def get_num_layers(self) -> int:
+        """Return the number of layers by checking the length of the stored accuracy list."""
         # Get the number of layers. We do it by getting the list of the accuracies over the layers.
         try:
             return len(self.get_metric("test", "accuracy"))
@@ -430,6 +469,7 @@ class ExperimentResult:
         extra_iter_num: int,
         zeroed_out_activation_dims: int = 0,
         zeroed_out_weight_dims: int = 0,
+        force_original_labels: bool = False,
     ) -> str:
         """Generate filename based on experiment parameters."""
         base = f"{language},{probing_task},{probe_type},{model_name}"
@@ -440,6 +480,8 @@ class ExperimentResult:
             suffixes.append(f"{zeroed_out_activation_dims}_zeroed_act_dims")
         if zeroed_out_weight_dims:
             suffixes.append(f"{zeroed_out_weight_dims}_zeroed_wt_dims")
+        if force_original_labels and "jp" in language:
+            suffixes.append("orig_labels")
         if suffixes:
             return f"{base},{','.join(suffixes)}.pkl"
         return f"{base}.pkl"
@@ -454,6 +496,7 @@ class ExperimentResult:
         extra_iter_num: int = 0,
         zeroed_out_activation_dims: int = 0,
         zeroed_out_weight_dims: int = 0,
+        force_original_labels: bool = False,
     ) -> "ExperimentResult":
         """
         Load an ExperimentResult from a pickle file.
@@ -461,7 +504,7 @@ class ExperimentResult:
         Returns:
             The loaded ExperimentResult object
         """
-        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num, zeroed_out_activation_dims, zeroed_out_weight_dims)}"
+        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num, zeroed_out_activation_dims, zeroed_out_weight_dims, force_original_labels)}"
         with open(filepath, "rb") as f:
             return pickle.load(f)
 
@@ -485,7 +528,41 @@ def show_plots(
     zeroed_out_weight_dims_list: list[int] = [0],
     horizontal_line: str | int = "",
     subplot_titles: list[str] | None = None,
+    as_bars: bool = True,
 ) -> None:
+    """
+    Load ExperimentResult files and generate plots grouped by characteristic combinations.
+
+    Iterates over all combinations of the provided parameters. Characteristics listed in
+    `separate_chars_within_plot` create multiple lines/bars within a single subplot; all
+    other characteristics produce separate subplots. Delegates rendering to
+    `plot_metrics_by_group_as_bars` when as_bars=True, otherwise `plot_metrics_by_group`.
+
+    Args:
+        experiment_number: Which experiment's results to load.
+        model_names: Model names to include.
+        splits: Data splits to plot (e.g. ["train", "test"]).
+        languages: Language keys; may include "_original_labels" suffix or "→"-separated pairs.
+        probing_tasks: Probing tasks to include (e.g. ["standard", "control"]).
+        extra_iter_nums: Extra refit iteration counts to include (experiment 2 only).
+        probe_type: Probe type used when loading results.
+        metric: Metric key to retrieve from ExperimentResult.
+        separate_chars_within_plot: Characteristics that vary within a single subplot.
+            Valid values: "model_name", "split", "class_name", "language" (or "language_a"
+            / "language_b"), "probing_task", "extra_iter_num",
+            "zeroed_out_activation_dims", "zeroed_out_weight_dims".
+        y_axis_range: Fixed (min, max) y-axis range; auto-computed if None.
+        show: Whether to call plt.show().
+        save: Whether to save the figure to disk (requires filename).
+        filename: Output filename (required when save=True).
+        legend_position: Legend location string passed to matplotlib.
+        zeroed_out_activation_dims_list: Ablation values for zeroed activation dims.
+        zeroed_out_weight_dims_list: Ablation values for zeroed weight dims.
+        horizontal_line: Draw a horizontal reference line. Pass a numeric value,
+            "baseline_f1", or "control_average".
+        subplot_titles: Override auto-generated subplot titles; pass [] to suppress all.
+        as_bars: If True (default) render grouped bar charts; otherwise render line plots.
+    """
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
 
@@ -580,7 +657,7 @@ def show_plots(
         model_name,
         split,
         class_id,
-        language,
+        language_key,
         probing_task,
         extra_iter_num,
         zeroed_out_activation_dims,
@@ -600,12 +677,16 @@ def show_plots(
         else:
             class_name = class_id
 
+        actual_language, force_original_labels = _resolve_language_key(language_key)
+
         combo: dict[str, Any] = {
             "model_name": model_name,
             "split": split,
             "class_id": class_id,
             "class_name": class_name,
-            "language": language,
+            "language": language_key,
+            "actual_language": actual_language,
+            "force_original_labels": force_original_labels,
             "probing_task": probing_task,
             "extra_iter_num": extra_iter_num,
             "zeroed_out_activation_dims": zeroed_out_activation_dims,
@@ -613,7 +694,7 @@ def show_plots(
         }
 
         if use_language_split:
-            lang_parts = language.split("→", 1)
+            lang_parts = language_key.split("→", 1)
             combo["language_a"] = lang_parts[0]
             combo["language_b"] = lang_parts[1] if len(lang_parts) > 1 else ""
 
@@ -629,18 +710,20 @@ def show_plots(
         # Load the experiment result
         exp_result: ExperimentResult = ExperimentResult.get_from_file(
             experiment_number,
-            combo["language"],
+            combo["actual_language"],
             combo["probing_task"],
             probe_type,
             combo["model_name"],
             combo["extra_iter_num"],
             combo["zeroed_out_activation_dims"],
             combo["zeroed_out_weight_dims"],
+            combo["force_original_labels"],
         )
 
         # Create plot request
         line_request: dict[str, str | ExperimentResult] = {
             "exp_result": exp_result,
+            "language_key": combo["language"],
             "split": combo["split"],
             "class_id": combo["class_id"],
             "class_name": combo["class_name"],
@@ -655,17 +738,62 @@ def show_plots(
     # Convert grouped plots to list format
     plots_to_make: list[list[dict]] = list(plots_dict.values())
 
-    plot_metrics_by_group(
-        plots_to_make,
-        metric,
-        show,
-        save,
-        filename,
-        y_axis_range,
-        legend_position=legend_position,
-        horizontal_line=horizontal_line,
-        subplot_titles=subplot_titles,
-    )
+    if as_bars:
+        plot_metrics_by_group_as_bars(
+            plots_to_make,
+            metric,
+            show,
+            save,
+            filename,
+            y_axis_range,
+            legend_position=legend_position,
+            horizontal_line=horizontal_line,
+            subplot_titles=subplot_titles,
+        )
+    else:
+        plot_metrics_by_group(
+            plots_to_make,
+            metric,
+            show,
+            save,
+            filename,
+            y_axis_range,
+            legend_position=legend_position,
+            horizontal_line=horizontal_line,
+            subplot_titles=subplot_titles,
+        )
+
+
+_ORIG_LABELS_SUFFIX = "_original_labels"
+
+
+def _resolve_language_key(lang_key: str) -> tuple[str, bool]:
+    """
+    Resolve a language key that may contain '_original_labels' on any component.
+
+    Returns (actual_language_string, force_original_labels).
+
+    Examples:
+        "jp_original_labels"    → ("jp", True)
+        "jp"                    → ("jp", False)
+        "jp_original_labels→en" → ("jp→en", True)
+        "en→jp_original_labels" → ("en→jp", True)
+    """
+    force = False
+    if "→" in lang_key:
+        parts = lang_key.split("→", 1)
+        resolved = []
+        for part in parts:
+            if part.endswith(_ORIG_LABELS_SUFFIX):
+                resolved.append(part[: -len(_ORIG_LABELS_SUFFIX)])
+                force = True
+            else:
+                resolved.append(part)
+        return "→".join(resolved), force
+    else:
+        if lang_key.endswith(_ORIG_LABELS_SUFFIX):
+            return lang_key[: -len(_ORIG_LABELS_SUFFIX)], True
+        return lang_key, False
 
 
 _CROSS_LINGUAL_RE = re.compile(r"trained in (.*?), tested in (.*)")
@@ -705,22 +833,28 @@ def plot_metrics_by_group(
     subplot_titles: list[str] | None = None,
 ) -> None:
     """
-    Plot metrics grouped by experiment groups.
+    Plot metrics grouped by experiment groups as line plots over layers.
 
-    Each group (inner list) becomes a separate subplot containing all experiments
-    in that group, where each experiment is plotted using its specified split and metric.
-
-    Titles and legends are automatically generated based on common and varying attributes
-    (language, probing task, probe type, model name, split, metric).
+    Each group (inner list) becomes a separate subplot; each element within a group
+    becomes one line. Titles and legends are automatically generated based on common
+    and varying attributes (language, probing task, probe type, model name, split, metric).
 
     Args:
-        plots_to_make: List of groups, where each group is a list of dictionaries
-        xlabel: Label for x-axis
-        show: Whether to display the plot
-        save: Whether to save the plot
-        filename: Filename for saving (required if save=True)
-        y_axis_range: Optional y-axis range (min, max)
-        scale: Scaling factor for figure size
+        plots_to_make: Output of show_plots' internal grouping — list of groups, where
+            each group is a list of line-request dicts (keys: exp_result, split,
+            class_id, class_name, language_key).
+        metric: Metric key to retrieve from ExperimentResult.
+        show: Whether to call plt.show().
+        save: Whether to save the figure to disk (requires filename).
+        filename: Output filename (required when save=True).
+        y_axis_range: Fixed (min, max) y-axis range; auto-computed if None.
+        legend_position: Legend location string passed to matplotlib.
+        xlabel: Label for the x-axis (default "Layer").
+        scale: Scaling factor applied to the default figure size.
+        sort_lines: If True, sort lines within each subplot by descending average value.
+        horizontal_line: Draw a reference line — numeric value, "baseline_f1", or
+            "control_average" (renders the control series as a dashed horizontal average).
+        subplot_titles: Override auto-generated subplot titles; pass [] to suppress all.
     """
     num_plots: int = len(plots_to_make)
 
@@ -733,9 +867,14 @@ def plot_metrics_by_group(
             f"Warning: subplot_titles has {len(subplot_titles)} entries but there are {num_plots} subplots."
         )
 
-    # Calculate grid shape to approximate a square
-    cols: int = math.ceil(math.sqrt(num_plots))
-    rows: int = math.ceil(num_plots / cols)
+    # Calculate grid shape to approximate a square, but place exactly 3 plots
+    # in a single row.
+    if num_plots == 3:
+        cols: int = 3
+        rows: int = 1
+    else:
+        cols = math.ceil(math.sqrt(num_plots))
+        rows = math.ceil(num_plots / cols)
 
     single_subplot_size: tuple[int, int] = (7 * scale, 4 * scale)
     figsize: tuple[int, int] = (
@@ -805,8 +944,11 @@ def plot_metrics_by_group(
             exp_result: ExperimentResult = line_request["exp_result"]
             split: str = line_request["split"]
             class_name: str = line_request["class_name"]
+            display_language: str = line_request.get(
+                "language_key", exp_result.language
+            )
             attrs: dict[str, str] = {
-                "language": get_verbose_version_of_language_string(exp_result.language),
+                "language": get_verbose_version_of_language_string(display_language),
                 "probing_task": exp_result.probing_task,
                 "probe_type": exp_result.probe_type,
                 "model_name": exp_result.model_name,
@@ -1045,7 +1187,7 @@ def plot_metrics_by_group(
                     linestyle="--",
                     alpha=0.7,
                     color="gray",
-                    label="majority class baseline",
+                    label="baseline",
                 )
             else:
                 for i, (line_data, baseline) in enumerate(
@@ -1093,6 +1235,384 @@ def plot_metrics_by_group(
         plt.show()
 
 
+def plot_metrics_by_group_as_bars(
+    plots_to_make: list[list[dict]],
+    metric: str,
+    show: bool = True,
+    save: bool = False,
+    filename: str = "",
+    y_axis_range: tuple[float, float] | None = None,
+    legend_position: str = "upper left",
+    bins: list[str] | None = None,
+    xlabel: str = "Layer group",
+    scale: int = 1,
+    sort_lines: bool = False,
+    horizontal_line: str | int = "",
+    subplot_titles: list[str] | None = None,
+) -> None:
+    """
+    Like plot_metrics_by_group but creates grouped bar plots with layer-averaged values.
+
+    Layers are split into len(bins) equally-sized bins (extra layers go to earlier bins),
+    and values within each bin are averaged to produce one bar. Multiple line requests
+    within the same subplot appear as grouped bars, one group per bin.
+
+    Args:
+        plots_to_make: Output of show_plots' internal grouping — list of groups, where
+            each group is a list of line-request dicts (keys: exp_result, split,
+            class_id, class_name, language_key).
+        metric: Metric key to retrieve from ExperimentResult.
+        show: Whether to call plt.show().
+        save: Whether to save the figure to disk (requires filename).
+        filename: Output filename (required when save=True).
+        y_axis_range: Fixed (min, max) y-axis range; auto-computed from binned values if None.
+        legend_position: Legend location string passed to matplotlib.
+        bins: Labels for the layer bins. Defaults to ["early", "middle", "late"].
+        xlabel: Label for the x-axis (default "Layer group").
+        scale: Scaling factor applied to the default figure size.
+        sort_lines: If True, sort bars within each subplot by descending average value.
+        horizontal_line: Draw a reference line — numeric value, "baseline_f1", or
+            "control_average" (renders the control series as a dashed horizontal average).
+        subplot_titles: Override auto-generated subplot titles; pass [] to suppress all.
+    """
+    if (save and not filename) or (filename and not save):
+        raise KeyError("save and filename should both be specified or neither")
+
+    if bins is None:
+        bins = ["early", "middle", "late"]
+
+    num_bins = len(bins)
+    num_plots = len(plots_to_make)
+
+    # Place exactly 3 plots in a single row; otherwise approximate a square.
+    if num_plots == 3:
+        cols = 3
+        rows = 1
+    else:
+        cols = math.ceil(math.sqrt(num_plots))
+        rows = math.ceil(num_plots / cols)
+    figsize = (7 * scale * cols, 4 * scale * rows)
+    fig, axs = plt.subplots(nrows=rows, ncols=cols, figsize=figsize, squeeze=False)
+
+    attribute_sequence: list[str] = [
+        "language",
+        "probing_task",
+        "label",
+        "probe_type",
+        "model_name",
+        "extra_iter_num",
+        "zeroed_out_activation_dims",
+        "zeroed_out_weight_dims",
+        "split",
+        "metric",
+    ]
+
+    def _extract_values(line_request: dict) -> list[float]:
+        exp_result: ExperimentResult = line_request["exp_result"]
+        split: str = line_request["split"]
+        class_id: str = line_request["class_id"]
+        results = exp_result.metrics[split][metric]
+        if "per_class" in metric or "overlapping_idx_amounts" in metric:
+            values: list[float] = [r.get(class_id, 0) for r in results]
+            if "overlapping_idx_amounts" in metric:
+                values = values[1:]
+        else:
+            values = [float(v) for v in results]
+        return values
+
+    def _bin_average(values: list[float]) -> list[float]:
+        n = len(values)
+        base = n // num_bins
+        remainder = n % num_bins
+        averages: list[float] = []
+        start = 0
+        for i in range(num_bins):
+            size = base + (1 if i < remainder else 0)
+            chunk = values[start : start + size]
+            averages.append(float(np.mean(chunk)) if chunk else 0.0)
+            start += size
+        return averages
+
+    # Auto y-axis range from binned values
+    if y_axis_range is None:
+        all_binned: list[float] = []
+        for group in plots_to_make:
+            seen_test_a_base = False
+            for line_request in group:
+                exp_result = line_request["exp_result"]
+                is_test_a_base = (
+                    line_request["split"] == "test_a" and exp_result.extra_iter_num == 0
+                )
+                if is_test_a_base:
+                    if seen_test_a_base:
+                        continue
+                    seen_test_a_base = True
+                all_binned.extend(_bin_average(_extract_values(line_request)))
+        margin = 0.1
+        y_axis_range = (min(all_binned) - margin, max(all_binned) + margin)
+
+    for plot_idx, group_of_line_requests in enumerate(plots_to_make):
+        ax = axs[plot_idx // cols, plot_idx % cols]
+
+        # Build per-line attribute dicts for title/legend generation
+        attrs_per_line: list[dict[str, str]] = []
+        for line_request in group_of_line_requests:
+            exp_result: ExperimentResult = line_request["exp_result"]
+            display_language: str = line_request.get(
+                "language_key", exp_result.language
+            )
+            raw_attrs: dict[str, str] = {
+                "language": get_verbose_version_of_language_string(display_language),
+                "probing_task": exp_result.probing_task,
+                "probe_type": exp_result.probe_type,
+                "model_name": exp_result.model_name,
+                "extra_iter_num": str(exp_result.extra_iter_num),
+                "zeroed_out_activation_dims": str(
+                    getattr(exp_result, "zeroed_out_activation_dims", 0)
+                ),
+                "zeroed_out_weight_dims": str(
+                    getattr(exp_result, "zeroed_out_weight_dims", 0)
+                ),
+                "split": line_request["split"],
+                "metric": metric,
+                "label": line_request["class_name"],
+            }
+            attrs_per_line.append(
+                {k: v.replace("_", " ") for k, v in raw_attrs.items()}
+            )
+
+        # Determine which attributes are common vs. varying across all lines
+        common_attrs: dict[str, str] = {}
+        varying_attrs: set[str] = set()
+        for attr_key in attribute_sequence:
+            if (
+                attr_key == "label"
+                and "per_class" not in metric
+                and "overlapping_idx_amounts" not in metric
+            ):
+                continue
+            values_for_attr = [a[attr_key] for a in attrs_per_line]
+            if len(set(values_for_attr)) == 1:
+                common_attrs[attr_key] = values_for_attr[0]
+            else:
+                varying_attrs.add(attr_key)
+
+        # Title
+        common_parts = [
+            common_attrs[k] for k in attribute_sequence if k in common_attrs
+        ]
+        different_parts = [
+            k.replace("_", " ") + "s" for k in attribute_sequence if k in varying_attrs
+        ]
+        if different_parts:
+            title = f"Results of {', '.join(common_parts)} for different {', '.join(different_parts)} over layer groups"
+        else:
+            title = f"Results of {', '.join(common_parts)} over layer groups"
+
+        if subplot_titles is None or (
+            subplot_titles and plot_idx >= len(subplot_titles)
+        ):
+            ax.set_title(title, fontsize=10)
+        elif subplot_titles:
+            ax.set_title(subplot_titles[plot_idx], fontsize=10)
+
+        # Collect bar data for each line request
+        bars_to_plot: list[dict] = []
+        seen_test_a_base = False
+        for i, line_request in enumerate(group_of_line_requests):
+            exp_result = line_request["exp_result"]
+            split = line_request["split"]
+            is_test_a_base = split == "test_a" and exp_result.extra_iter_num == 0
+            if is_test_a_base:
+                if seen_test_a_base:
+                    continue
+                seen_test_a_base = True
+
+            binned = _bin_average(_extract_values(line_request))
+
+            # Legend label — same cross-lingual label rewriting as plot_metrics_by_group
+            legend_parts = [
+                attrs_per_line[i][k] for k in attribute_sequence if k in varying_attrs
+            ]
+            cl_idx = next(
+                (
+                    j
+                    for j, p in enumerate(legend_parts)
+                    if _CROSS_LINGUAL_RE.fullmatch(p)
+                ),
+                None,
+            )
+            tz_idx = next(
+                (j for j, p in enumerate(legend_parts) if _TEST_Z_RE.fullmatch(p)), None
+            )
+            legend_label = " ".join(legend_parts)
+
+            if cl_idx is not None and tz_idx is not None:
+                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
+                tz = _TEST_Z_RE.fullmatch(legend_parts[tz_idx])
+                X, Y, raw_Z = cl.group(1), cl.group(2), tz.group(1)  # type: ignore
+                other = [
+                    p for j, p in enumerate(legend_parts) if j not in {cl_idx, tz_idx}
+                ]
+                if raw_Z == "a":
+                    legend_label = " ".join([*other, f"{X}→{Y}→{X}"]).strip()
+                elif raw_Z == "b":
+                    legend_label = " ".join([*other, f"{X}→{Y}"]).strip()
+            elif (
+                cl_idx is not None
+                and len(legend_parts) == 1
+                and exp_result.extra_iter_num > 0
+            ):
+                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
+                X, Y = cl.group(1), cl.group(2)  # type: ignore
+                legend_label = f"t{X}→{Y}"
+
+            if is_test_a_base:
+                lang_a = exp_result.language.split("→")[0]
+                legend_label = f"{LANGUAGE_FULL_NAME_MAP[lang_a]}"
+
+            bars_to_plot.append(
+                {
+                    "binned": binned,
+                    "average_value": float(np.mean(binned)),
+                    "legend_label": legend_label,
+                    "is_control": "control" in exp_result.probing_task,
+                    "is_test_a_base": is_test_a_base,
+                    "probing_task": exp_result.probing_task,
+                    "language": exp_result.language,
+                }
+            )
+
+        if sort_lines:
+            bars_to_plot.sort(key=lambda x: x["average_value"], reverse=True)
+
+        # Assign colours (same language-based scheme as plot_metrics_by_group)
+        lang_color_counts: dict[str, int] = defaultdict(int)
+        okabe_ito_idx = 0
+        for bar_data in bars_to_plot:
+            lang_parts = bar_data["language"].split("→")
+            lang_key = lang_parts[0] if bar_data["is_test_a_base"] else lang_parts[-1]
+            lang_count = lang_color_counts[lang_key]
+            lang_color_counts[lang_key] += 1
+
+            if lang_key in LANGUAGE_COLOURS:
+                if lang_count == 0:
+                    colour = LANGUAGE_COLOURS[lang_key][0]
+                elif lang_count == 1:
+                    colour = mcolors.to_rgb(LANGUAGE_COLOURS[lang_key][1])
+                else:
+                    colour = OKABE_ITO_PALETTE[okabe_ito_idx % len(OKABE_ITO_PALETTE)]
+                    okabe_ito_idx += 1
+            else:
+                colour = OKABE_ITO_PALETTE[okabe_ito_idx % len(OKABE_ITO_PALETTE)]
+                okabe_ito_idx += 1
+
+            bar_data["colour"] = colour
+
+        # Draw grouped bars
+        n_lines = len(bars_to_plot)
+        x = np.arange(num_bins)
+        bar_width = (0.8 / n_lines) if n_lines > 1 else 0.5
+        # Each subplot is 7*scale inches wide, spanning num_bins data units.
+        # Fit 5 chars ("-0.00") in 80% of the bar width, assuming ~0.6x aspect ratio for the font.
+        bar_width_inches = bar_width / num_bins * 7 * scale
+        label_fontsize = max(5, min(9, int(bar_width_inches * 72 / (5 * 0.6))))
+
+        for i, bar_data in enumerate(bars_to_plot):
+            offset = (i - (n_lines - 1) / 2) * bar_width
+            colour = bar_data["colour"]
+            if horizontal_line == "control_average" and bar_data["is_control"]:
+                ax.axhline(
+                    y=bar_data["average_value"],
+                    linestyle="--",
+                    alpha=0.7,
+                    color=colour,
+                    label=f"avg {bar_data['legend_label']}",
+                )
+            else:
+                ax.bar(
+                    x + offset,
+                    bar_data["binned"],
+                    width=bar_width,
+                    label=bar_data["legend_label"],
+                    color=colour,
+                    alpha=0.85,
+                )
+                for bin_x, val in zip(x + offset, bar_data["binned"]):
+                    va = "top" if val >= 0 else "bottom"
+                    pad = -0.01 if val >= 0 else 0.01
+                    ax.text(
+                        bin_x,
+                        val + pad,
+                        f"{val:.2f}",
+                        ha="center",
+                        va=va,
+                        fontsize=label_fontsize,
+                        color="black",
+                    )
+
+        # Horizontal reference lines
+        if horizontal_line == "baseline_f1":
+            if "f1" not in metric:
+                print(
+                    f"Warning: horizontal_line='baseline_f1' specified but metric is '{metric}'."
+                )
+            baseline_values = [
+                calculate_majority_class_baseline_f1(
+                    probing_task=b["probing_task"], language="en"
+                )
+                for b in bars_to_plot
+            ]
+            if max(baseline_values) - min(baseline_values) <= 0.05:
+                ax.axhline(
+                    y=float(np.mean(baseline_values)),
+                    linestyle="--",
+                    alpha=0.7,
+                    color="gray",
+                    label="baseline",
+                )
+            else:
+                for bar_data, baseline in zip(bars_to_plot, baseline_values):
+                    label = f"majority baseline {bar_data['legend_label']}".strip()
+                    ax.axhline(
+                        y=baseline,
+                        linestyle="--",
+                        alpha=0.7,
+                        color=bar_data["colour"],
+                        label=label,
+                    )
+        elif horizontal_line != "" and horizontal_line != "control_average":
+            ax.axhline(y=float(horizontal_line), linestyle="--", alpha=0.7)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(bins)
+        ax.set_xlabel(xlabel)
+        ylabel = (
+            f"selectivity ({metric[len('marginal_'):].replace('_', ' ')})"
+            if metric.startswith("marginal_")
+            else metric.replace("_", " ")
+        )
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3, axis="y")
+        ax.legend(loc=legend_position, fontsize=7)
+        ax.set_ylim(y_axis_range)
+
+    for plot_idx in range(num_plots, rows * cols):
+        axs[plot_idx // cols, plot_idx % cols].set_visible(False)
+
+    if save:
+        save_dir = Path(PLOTS_FOLDER)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        filepath = save_dir / (
+            filename if filename.endswith(".png") else f"{filename}.png"
+        )
+        fig.savefig(filepath)  # type: ignore
+        print(f"Plot saved to {filepath}")
+
+    if show:
+        plt.show()
+
+
 def plot_confusion_matrix(
     exp_result: ExperimentResult,
     split: str,
@@ -1107,16 +1627,19 @@ def plot_confusion_matrix(
     Plot a confusion matrix as a heatmap using seaborn.
 
     Args:
-        exp_result: ExperimentResult object containing the confusion matrix
-        split: Data split (e.g., "train" or "test")
-        layer_num: Layer number to retrieve the confusion matrix from
-        show: Whether to display the plot
-        save: Whether to save the plot
-        filename: Filename for saving (required if save=True)
-        figsize: Figure size as (width, height)
+        exp_result: ExperimentResult object containing the confusion matrix.
+        split: Data split (e.g., "train" or "test").
+        layer_num: Index into the stored confusion matrix list (0 for experiment 3,
+            layer number for experiments 1 and 2).
+        show: Whether to call plt.show().
+        save: Whether to save the figure to disk (requires filename).
+        filename: Output filename (required when save=True).
+        figsize: Figure size as (width, height).
+        include_unknown: If True, keep the -1 "unknown" row/column in the 4x4 matrix
+            (experiment 3 only). Defaults to False.
 
     Raises:
-        KeyError: If save and filename are not both specified or both omitted
+        KeyError: If save and filename are not both specified or both omitted.
     """
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")

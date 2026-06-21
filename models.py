@@ -4,6 +4,11 @@ from pathlib import Path
 
 
 def load_and_save_model(model_name: str) -> None:
+    """Download a model from HuggingFace Hub and save it to the local models directory.
+
+    Args:
+        model_name: Key in MODEL_IDS / MODEL_NAMES (e.g. 'olmo_model').
+    """
     model_id: str = MODEL_IDS[model_name]
 
     model = AutoModelForCausalLM.from_pretrained(model_id)

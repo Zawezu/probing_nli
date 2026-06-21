@@ -104,6 +104,7 @@ class BootstrapSignificanceTester:
     def _get_idx_map(
         self, result: ExperimentResult, layer_num: int
     ) -> dict[int, tuple[int, int]]:
+        """Extract and parse the per-sample (real_label, pred_label) map for one layer."""
         idxs_per_cm_cell = result.get_metric(self.split, "idxs_per_cm_cell", layer_num)
         return _parse_idxs_per_cm_cell(idxs_per_cm_cell)
 
@@ -120,8 +121,9 @@ class BootstrapSignificanceTester:
         Args:
             layer_num: Layer index. Use 0 for experiment 3.
             metric_fn: (real_labels, pred_labels) -> float performance metric.
+            alpha: Significance level (e.g. 0.05 for a 95% CI). Bonferroni correction
+                   is applied by the caller before passing this value.
             exclude_labels: Real labels to exclude (e.g. [-1] for unknown in exp 3).
-            confidence: Confidence level for the bootstrap interval, e.g. 0.95.
 
         Returns:
             Dict with keys:
@@ -229,7 +231,8 @@ class BootstrapSignificanceTester:
             num_layers: Test layers 0..num_layers-1. If None, use result_1.get_num_layers()
                         (for experiment 3 this equals 1, so the loop runs once at layer 0).
             exclude_labels: Real labels to exclude (e.g. [-1] to drop unknowns in exp 3).
-            confidence: Confidence level for bootstrap intervals.
+            alpha: Significance level (e.g. 0.05). Bonferroni-corrected per layer before
+                   calling run_layer.
             save: If True, persist results to JSON in SIGNIFICANCE_RESULTS_FOLDER.
             test_name: Filename stem for the saved file (required when save=True).
 
@@ -256,6 +259,10 @@ class BootstrapSignificanceTester:
 
     @staticmethod
     def _save_results(layer_results: list[dict[str, Any]], test_name: str) -> None:
+        """Serialize layer_results to a JSON file in SIGNIFICANCE_RESULTS_FOLDER.
+
+        numpy arrays are converted to lists for JSON compatibility.
+        """
         save_dir = Path(SIGNIFICANCE_RESULTS_FOLDER)
         save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -673,6 +680,7 @@ class BootstrapSignificanceTester:
 
     @staticmethod
     def _maybe_save(fig: Figure, save: bool, filename: str) -> None:
+        """Save `fig` as a PNG to PLOTS_FOLDER if `save` is True."""
         if not save:
             return
         save_dir = Path(PLOTS_FOLDER)
@@ -685,6 +693,7 @@ class BootstrapSignificanceTester:
 def get_test_name(
     test, model_name, split, changing_var_1, changing_var_2, extra_iter_num=0
 ):
+    """Build a canonical, comma-separated filename stem for a significance test result."""
     return f"{test},{model_name},{split},{extra_iter_num},{changing_var_1}_vs_{changing_var_2}"
 
 

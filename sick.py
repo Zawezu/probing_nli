@@ -26,6 +26,15 @@ random.seed(42)
 
 class SICKDirtyDataset(Dataset):
     def __init__(self, language: str, split: str) -> None:
+        """Load a single-language SICK split directly from its original source file.
+
+        Supports 'en', 'es', 'jp', and 'nl'. Maps the dataset's 'trial' split to
+        the 'val' split name used throughout this project.
+
+        Args:
+            language: Language code ('en', 'es', 'jp', or 'nl').
+            split: One of 'train', 'test', or 'val'.
+        """
         self.sentence_pairs: list[tuple[str, str]] = []
         self.labels: list[int] = []
         self.original_ids: list[int] = []
@@ -36,6 +45,7 @@ class SICKDirtyDataset(Dataset):
         self._load_dirty_dataset(split)
 
     def _load_dirty_dataset(self, split: str) -> None:
+        """Parse the raw source file for self.language and populate sentence_pairs, labels, and original_ids."""
         # The original set has a trial instead of a validation set, so the _load_dirty_dataset function will use trial
         original_split: str = "trial" if split == "val" else split
 
@@ -153,8 +163,25 @@ class SICKDirtyDataset(Dataset):
 
 class SICKMergedDataset(Dataset):
     def __init__(
-        self, language: str, split: str, control_type="noun_based_control_label"
+        self,
+        language: str,
+        split: str,
+        control_type="noun_based_control_label",
+        force_original_labels: bool = False,
     ) -> None:
+        """Load a language/split slice from the pre-built merged SICK JSON.
+
+        The merged file contains all languages and all control label columns. Each
+        sample's label dict holds both the 'standard' NLI label and a control label
+        determined by `control_type`.
+
+        Args:
+            language: Language code ('en', 'es', 'jp', or 'nl').
+            split: One of 'train', 'test', or 'val'.
+            control_type: Column name for the control label (default: 'noun_based_control_label').
+            force_original_labels: If True and language is 'jp', use 'standard_label'
+                instead of 'standard_japanese_label'.
+        """
         self.sentence_pairs: list[tuple[str, str]] = []
         self.labels: list[dict[str, int]] = []
         self.original_ids: list[int] = []
@@ -162,10 +189,12 @@ class SICKMergedDataset(Dataset):
         self.language: str = language
         self.split: str = split
         self.control_type: str = control_type
+        self.force_original_labels = force_original_labels
 
         self.load_dataset()
 
     def load_dataset(self) -> None:
+        """Read MERGED_SICK_FILEPATH and populate sentence_pairs, labels, and original_ids."""
         with open(MERGED_SICK_FILEPATH, "r", encoding="utf-8") as file:
             merged_dataset_dict: dict[str, dict[str, str | int]] = json.load(file)
 
@@ -179,7 +208,7 @@ class SICKMergedDataset(Dataset):
                 )
 
                 # Japanese uses slightly different labels
-                if self.language == "jp":
+                if self.language == "jp" and not self.force_original_labels:
                     standard_label_key = "standard_japanese_label"
                 else:
                     standard_label_key = "standard_label"
@@ -195,6 +224,13 @@ class SICKMergedDataset(Dataset):
     def get_labels(
         self, start: int = 0, end: int | None = None, probing_task: str = "standard"
     ) -> list[int]:
+        """Return integer labels for a slice of the dataset.
+
+        Args:
+            start: First index (inclusive).
+            end: Last index (exclusive); defaults to the end of the dataset.
+            probing_task: Which label column to extract ('standard' or 'control').
+        """
         if end is None:
             end = len(self.labels)
 
@@ -215,6 +251,10 @@ class SICKMergedDataset(Dataset):
 def calculate_majority_class_baseline_f1(
     probing_task: str, language: str, control_type: str = "noun_based_control_label"
 ) -> float:
+    """Compute the macro-F1 a majority-class classifier achieves on the test split.
+
+    The majority class is determined from the training split.
+    """
     train_dataset = SICKMergedDataset(language, "train", control_type)
     majority_class: int = Counter(
         train_dataset.get_labels(probing_task=probing_task)
@@ -228,9 +268,12 @@ def calculate_majority_class_baseline_f1(
 
 
 def get_dataset_and_dataloader(
-    language, split, batch_size=1
+    language, split, batch_size=1, force_original_labels=False
 ) -> tuple[SICKMergedDataset, DataLoader[tuple[tuple[str, str], dict[str, int], int]]]:
-    dataset: SICKMergedDataset = SICKMergedDataset(language, split)
+    """Construct a SICKMergedDataset and a non-shuffled DataLoader for it."""
+    dataset: SICKMergedDataset = SICKMergedDataset(
+        language, split, force_original_labels=force_original_labels
+    )
 
     dataloader: DataLoader[tuple[tuple[str, str], dict[str, int], int]] = DataLoader(
         dataset, batch_size=batch_size, shuffle=False
@@ -240,6 +283,7 @@ def get_dataset_and_dataloader(
 
 
 def add_to_dict(dictionary, key, value) -> None:
+    """Insert key/value into dictionary only if key is absent; assert consistency if already present."""
     try:
         assert dictionary[key] == value
     except KeyError:
@@ -247,6 +291,12 @@ def add_to_dict(dictionary, key, value) -> None:
 
 
 def create_disjunct_control_labels(dataset_dict, unique_labels, amount_per_label):
+    """Assign a random control label to each entry that is guaranteed to differ from its standard label.
+
+    Uses class-conditional sampling: the probability of drawing each label is
+    proportional to its overall frequency in the dataset, but the entry's own
+    original label is excluded (weight set to 0).
+    """
     print("Creating disjunct control labels")
     # Create dictionary with the label_ratios when we exclude each of the labels
     total_amount: int = sum(amount_per_label)
@@ -277,6 +327,11 @@ def create_disjunct_control_labels(dataset_dict, unique_labels, amount_per_label
 
 
 def create_non_disjunct_control_labels(dataset_dict, unique_labels, amount_per_label):
+    """Assign random control labels sampled from the same class distribution as the standard labels.
+
+    Unlike the disjunct variant, a control label may coincide with the standard label.
+    Labels are drawn without replacement across the full dataset to preserve class ratios.
+    """
     print("Creating non-disjunct control labels")
     print(f"Amount per label: {amount_per_label}")
     label_ratios: list[float] = [
@@ -294,6 +349,11 @@ def create_non_disjunct_control_labels(dataset_dict, unique_labels, amount_per_l
 
 
 def create_id_hash_control_labels(dataset_dict, unique_labels) -> None:
+    """Assign a deterministic control label to each entry derived from the SHA-256 hash of its ID.
+
+    The hash is reduced modulo the number of unique labels, giving a reproducible but
+    pseudo-random assignment that is independent of the standard label.
+    """
     print("Creating pair id-based control labels")
 
     n: int = len(unique_labels)
@@ -306,6 +366,11 @@ def create_id_hash_control_labels(dataset_dict, unique_labels) -> None:
 
 
 def create_noun_based_control_labels(dataset_dict, unique_labels) -> None:
+    """Assign a control label based on the first noun in sentence_a_en.
+
+    All pairs sharing the same first noun receive the same randomly chosen label.
+    Pairs with no noun are grouped under the '__no_noun__' key.
+    """
     print("Creating noun-based control labels")
 
     noun_tags = {"NN", "NNS", "NNP", "NNPS"}
@@ -341,8 +406,14 @@ def create_noun_based_control_labels(dataset_dict, unique_labels) -> None:
 def create_control_labels(
     dataset_dict, disjunct: bool, predetermined_label_ratio: list[float] | None = None
 ) -> None:
-    """
-    disjunt: determines whether the label at some line is necessarily different from the original label
+    """Create all control label columns and write them into dataset_dict in place.
+
+    When `predetermined_label_ratio` is None the class distribution is derived from
+    the actual standard labels. Pass `disjunct=True` to guarantee each control label
+    differs from the corresponding standard label, or False to allow coincidences.
+
+    If `predetermined_label_ratio` is given (must sum to 1.0), only disjunct labels
+    are created using the specified ratios instead of the empirical ones.
     """
     print("Creating all control labels")
     unique_labels: list[int] = list(LABEL_MAP.values())
@@ -378,6 +449,13 @@ def create_control_labels(
 
 
 def create_merged_json(save=False) -> None:
+    """Build the merged SICK JSON that combines all languages, splits, and control labels.
+
+    Iterates over all languages and splits, aligning sentence pairs by their original
+    pair_ID. Japanese entries that have no English counterpart are skipped. All control
+    label variants are added via `create_control_labels`. When `save=True` the result
+    is written to MERGED_SICK_FILEPATH.
+    """
     merged_dataset_dict: dict[str, dict[str, str | int]] = {}
 
     seen_ids = set()
@@ -429,15 +507,37 @@ def create_merged_json(save=False) -> None:
 
 if __name__ == "__main__":
     # create_merged_json(save=True)
+
+    # Sanity tests
     # for language in LANGUAGES:
     #     print(language)
     #     split= "train"
 
     #     dataset, dataloader = get_dataset_and_dataloader(language, split)
 
-    #     print(dataset.sentence_pairs[:10])
-    for probing_task in ["standard", "control"]:
-        for language in ["en", "jp"]:
-            print(
-                f"f1 for majority class of {probing_task} {language}: {calculate_majority_class_baseline_f1('standard', 'en')}"
-            )
+    #     print(dataset.labels[:20])
+
+    dataset_en, dataloader_en = get_dataset_and_dataloader("en", "train")
+    dataset_jp, dataloader_jp = get_dataset_and_dataloader(
+        "jp", "train", force_original_labels=True
+    )
+
+    diffs_in_standard = 0
+    diffs_in_control = 0
+
+    for label_en, label_jp in zip(dataset_en.labels, dataset_jp.labels):
+        if label_en["standard"] != label_jp["standard"]:
+            print("Difference in standard!")
+            diffs_in_standard += 1
+
+        if label_en["control"] != label_jp["control"]:
+            print("Difference in control!")
+            diffs_in_control += 1
+
+    print(f"Differences in standard: {diffs_in_standard}")
+    print(f"Differences in control: {diffs_in_control}")
+    # for probing_task in ["standard", "control"]:
+    #     for language in ["en", "jp"]:
+    #         print(
+    #             f"f1 for majority class of {probing_task} {language}: {calculate_majority_class_baseline_f1('standard', 'en')}"
+    #         )

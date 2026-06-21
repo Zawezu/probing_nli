@@ -28,6 +28,7 @@ mlp_training_parameters: dict[str, float | int] = {
 
 
 def _get_probe_subfolder(probe_type: str) -> str:
+    """Return the subdirectory name for a given probe type (e.g. 'lr' -> 'logistic_regression')."""
     if probe_type not in PROBE_TYPE_SUBFOLDERS:
         raise KeyError(
             f"Unknown probe type '{probe_type}'. Valid types: {list(PROBE_TYPE_SUBFOLDERS)}"
@@ -101,12 +102,13 @@ class LRProbe:
         Create LRProbe from an activation dataset.
 
         Args:
-            dataset: ActivationDataset with activations and labels
-            C: Inverse of regularisation strength for LogisticRegression
+            dataset: ActivationDataset with activations and labels.
+            C: Inverse of regularisation strength for LogisticRegression.
+            fit_intercept: Whether to fit a bias term in the logistic regression.
             zeroed_out_activation_dims: Number of highest-average-magnitude dims to zero out before training.
 
         Returns:
-            Fitted LRProbe instance
+            Fitted LRProbe instance.
         """
         acts, labels = (dataset.activations, dataset.labels)
         X = acts.cpu().float().numpy()
@@ -156,8 +158,14 @@ class LRProbe:
         )
 
     def refit(self, new_dataset, iterations) -> None:
-        """
-        Continue training the existing model on new data.
+        """Continue training the existing model on new data using warm-start.
+
+        The existing scaler parameters are reused so the feature space stays
+        consistent between the initial fit and refitting.
+
+        Args:
+            new_dataset: ActivationDataset to retrain on.
+            iterations: Maximum number of solver iterations for this refit step.
         """
         acts, labels = (new_dataset.activations, new_dataset.labels)
         X = acts.cpu().float().numpy()
@@ -176,6 +184,14 @@ class LRProbe:
         self.lr_model.fit(X_scaled, y)
 
     def get_vector(self, per_class: bool = False) -> np.ndarray:
+        """Return the probe's weight vectors, optionally concatenated with intercepts.
+
+        Args:
+            per_class: If True, return shape (n_classes, n_features+1) — one row per
+                class with coefficients and intercept appended.
+                If False, return shape (1, n_classes*n_features + n_classes) — all
+                coefficients flattened followed by all intercepts.
+        """
         coef = self.lr_model.coef_  # shape (3, n)
         intercept = self.lr_model.intercept_  # shape (3,)
 
@@ -290,37 +306,45 @@ class LRProbe:
             return {0: sim}
 
     def calculate_l2_dist(
-        self, second_lr_probe: "LRProbe", per_class: bool = False
+        self,
+        second_lr_probe: "LRProbe",
+        per_class: bool = False,
+        normalise: bool = True,
     ) -> dict[int, float]:
-        """
-        Calculate L2 dist (Euclidean distance) between this probe and another.
+        """Calculate L2 (Euclidean) distance between this probe and another LRProbe.
 
         Args:
-            second_lr_probe: The other LRProbe to compare with
-            per_class: If True, return L2 dist for each class separately.
-                      If False, return L2 dist for the flattened vectors as class 0.
+            second_lr_probe: The other LRProbe to compare with.
+            per_class: If True, return distance per class; if False, use flattened vectors.
+            normalise: If True, unit-normalise both vectors before computing the distance.
 
         Returns:
-            Dictionary mapping class index to L2 dist value
+            Dictionary mapping class index (or 0 for flattened) to L2 distance.
         """
         if per_class:
-            vector_1 = self.get_vector(per_class=True)  # shape (3, n+1)
-            vector_2 = second_lr_probe.get_vector(per_class=True)  # shape (3, n+1)
+            vector_1 = self.get_vector(per_class=True)
+            vector_2 = second_lr_probe.get_vector(per_class=True)
             l2_dists = {}
             for i in range(vector_1.shape[0]):
-                dist = np.linalg.norm(vector_1[i] - vector_2[i])
-                l2_dists[int(self.lr_model.classes_[i])] = dist
+                v1, v2 = vector_1[i], vector_2[i]
+                if normalise:
+                    v1 = v1 / (np.linalg.norm(v1) + 1e-10)
+                    v2 = v2 / (np.linalg.norm(v2) + 1e-10)
+                l2_dists[int(self.lr_model.classes_[i])] = np.linalg.norm(v1 - v2)
             return l2_dists
         else:
-            vector_1 = self.get_vector(per_class=False)  # shape (1, 3n+3)
-            vector_2 = second_lr_probe.get_vector(per_class=False)  # shape (1, 3n+3)
-            dist = np.linalg.norm(vector_1 - vector_2)
-            return {0: dist}  # type: ignore
+            vector_1 = self.get_vector(per_class=False)
+            vector_2 = second_lr_probe.get_vector(per_class=False)
+            v1, v2 = vector_1[0], vector_2[0]
+            if normalise:
+                v1 = v1 / (np.linalg.norm(v1) + 1e-10)
+                v2 = v2 / (np.linalg.norm(v2) + 1e-10)
+            return {0: float(np.linalg.norm(v1 - v2))}
 
     def __str__(self) -> str:
         try:
             return f"Probe {', '.join(self.metadata.values())}"
-        except KeyError or ValueError or AttributeError:
+        except (KeyError, ValueError, AttributeError):
             return "Probe (Metadata missing)"
 
 
@@ -348,6 +372,7 @@ class MMProbe:
         metadata: dict[str, Any] | None = None,
         optimal_shrinkage: float | None = None,
         zeroed_dims: np.ndarray | None = None,
+        cov_invs: list[np.ndarray] | None = None,
     ) -> None:
         """
         Args:
@@ -357,6 +382,7 @@ class MMProbe:
             metadata: Optional dict with training metadata.
             optimal_shrinkage: Ledoit-Wolf shrinkage coefficient from training data.
             zeroed_dims: Indices of activation dimensions zeroed out during training.
+            cov_invs: List of 3 inverse covariance matrices (d×d), one per binary classifier.
         """
         self.directions = directions
         self.thresholds = thresholds
@@ -364,6 +390,7 @@ class MMProbe:
         self.metadata = metadata
         self.optimal_shrinkage = optimal_shrinkage
         self.zeroed_dims: np.ndarray | None = zeroed_dims
+        self.cov_invs: list[np.ndarray] | None = cov_invs
 
     def pred(self, x) -> np.ndarray:
         """
@@ -423,22 +450,38 @@ class MMProbe:
 
         directions: list[np.ndarray] = []
         thresholds: list[float] = []
+        cov_invs: list[np.ndarray] = []
 
         for pos_class, neg_class in MMProbe.CLASSIFIER_PAIRS:
             mask = (y == pos_class) | (y == neg_class)
-            X_bin = X[mask]
-            y_bin = y[mask]
+            X_relevant = X[mask]
+            y_relevant = y[mask]
 
-            mean_pos = X_bin[y_bin == pos_class].mean(axis=0)
-            mean_neg = X_bin[y_bin == neg_class].mean(axis=0)
+            mean_pos = X_relevant[y_relevant == pos_class].mean(axis=0)
+            mean_neg = X_relevant[y_relevant == neg_class].mean(axis=0)
+
+            # Compute pooled within-class covariance
+            X_pos = X_relevant[y_relevant == pos_class] - mean_pos
+            X_neg = X_relevant[y_relevant == neg_class] - mean_neg
+            X_centred = np.vstack([X_pos, X_neg])
+            cov, shrinkage = ledoit_wolf(X_centred)
+
+            # Apply inverse covariance (the mass-mean correction)
+            # try:
+            cov_inv = np.linalg.inv(cov)
+            # except np.linalg.LinAlgError:
+            #     cov_inv = np.linalg.pinv(cov)
 
             diff = mean_pos - mean_neg
-            norm = np.linalg.norm(diff)
-            direction = diff / norm if norm > 0 else diff
+            direction = cov_inv @ diff
+            norm = np.linalg.norm(direction)
+            direction = direction / norm if norm > 0 else direction
+
             threshold = float(0.5 * direction @ (mean_pos + mean_neg))
 
             directions.append(direction)
             thresholds.append(threshold)
+            cov_invs.append(cov_inv.astype(np.float32))
 
         feature_std = X.std(axis=0)
         feature_std[feature_std == 0] = 1.0  # prevent division by zero in Mahalanobis
@@ -460,6 +503,7 @@ class MMProbe:
             metadata,
             float(optimal_shrinkage),
             zeroed_dims,
+            cov_invs,
         )
 
     def refit(self, new_dataset, iterations) -> None:
@@ -467,22 +511,17 @@ class MMProbe:
 
     def get_vector(self, per_class: bool = False) -> np.ndarray:
         """
-        Return the probe weight vectors.
+        Return the probe direction vectors.
 
         Args:
-            per_class: If True, return shape (3, n_features+1) — one row per binary classifier,
-                       each row is [direction, threshold].
-                       If False, return shape (1, 3*n_features+3) — all directions then all thresholds.
+            per_class: If True, return shape (3, n_features) — one direction per binary classifier.
+                       If False, return shape (1, 3*n_features) — all directions flattened.
         """
         if per_class:
-            return np.array(
-                [np.append(d, th) for d, th in zip(self.directions, self.thresholds)]
-            )  # shape (3, n_features+1)
+            return np.array(self.directions)  # shape (3, n_features)
         else:
-            flattened = np.concatenate(
-                list(self.directions) + [np.array(self.thresholds)]
-            )
-            return flattened.reshape(1, -1)  # shape (1, 3*n_features+3)
+            flattened = np.concatenate(self.directions)
+            return flattened.reshape(1, -1)  # shape (1, 3*n_features)
 
     def calculate_cosine_similarity(
         self, second_probe: "MMProbe", per_class: bool = False
@@ -498,9 +537,16 @@ class MMProbe:
         Returns:
             Dictionary mapping classifier index (or 0) to cosine similarity value.
         """
+        print("1_thresholds:", self.thresholds)
+        print("2_thresholds:", second_probe.thresholds)
+
+        print("1_directions:", self.directions)
+        print("2_directions:", second_probe.directions)
+
         if per_class:
             vector_1 = self.get_vector(per_class=True)  # (3, n+1)
             vector_2 = second_probe.get_vector(per_class=True)
+
             return {
                 i: float(
                     cosine_similarity(vector_1[i : i + 1], vector_2[i : i + 1])[0, 0]
@@ -521,18 +567,54 @@ class MMProbe:
         """
         Calculate Mahalanobis cosine similarity between this probe and another MMProbe.
 
-        Uses a diagonal precision matrix based on the geometric mean of per-feature variances.
-        Threshold dimensions are left unscaled.
+        When both probes have stored cov_invs, uses the full precision matrices (average of
+        the two probes' per-classifier inverse covariances). Falls back to a diagonal
+        approximation based on per-feature variances for old probes that lack cov_invs.
+
+        For per_class=False, the flattened-vector similarity is computed with a block-diagonal
+        precision: block_diag(M_0, M_1, M_2), one block per binary classifier.
 
         Args:
             second_probe: The other MMProbe to compare with.
             per_class: If True, return similarity per binary classifier; if False, flattened.
-            shrinkage: Ledoit-Wolf shrinkage in [0, 1]. Defaults to average of both probes'
-                       optimal_shrinkage values, or 0.0 if unavailable.
+            shrinkage: Only used in the diagonal fallback path.
 
         Returns:
             Dictionary mapping classifier index (or 0) to Mahalanobis cosine similarity.
         """
+        self_cov_invs = getattr(self, "cov_invs", None)
+        other_cov_invs = getattr(second_probe, "cov_invs", None)
+
+        if self_cov_invs is not None and other_cov_invs is not None:
+            if per_class:
+                similarities = {}
+                for i in range(3):
+                    M = (self_cov_invs[i] + other_cov_invs[i]) / 2.0
+                    u = self.directions[i]
+                    v = second_probe.directions[i]
+                    Mu = M @ u
+                    Mv = M @ v
+                    num = float(u @ Mv)
+                    denom = float(np.sqrt((u @ Mu) * (v @ Mv)))
+                    similarities[i] = num / denom if denom > 0 else 0.0
+                return similarities
+            else:
+                num = 0.0
+                u_norm_sq = 0.0
+                v_norm_sq = 0.0
+                for i in range(3):
+                    M = (self_cov_invs[i] + other_cov_invs[i]) / 2.0
+                    u = self.directions[i]
+                    v = second_probe.directions[i]
+                    Mu = M @ u
+                    Mv = M @ v
+                    num += float(u @ Mv)
+                    u_norm_sq += float(u @ Mu)
+                    v_norm_sq += float(v @ Mv)
+                denom = np.sqrt(u_norm_sq * v_norm_sq)
+                return {0: float(num / denom) if denom > 0 else 0.0}
+
+        # Fallback: diagonal approximation using per-feature standard deviations
         if shrinkage is None:
             if (
                 self.optimal_shrinkage is not None
@@ -551,22 +633,19 @@ class MMProbe:
         precision = 1.0 / np.sqrt(sigma)
 
         if per_class:
-            vector_1 = self.get_vector(per_class=True)  # (3, n+1)
+            vector_1 = self.get_vector(per_class=True)  # (3, n_features)
             vector_2 = second_probe.get_vector(per_class=True)
-            # Weight feature dims by precision; leave threshold dim at 1.0
-            per_clf_precision = np.append(precision, 1.0)
             similarities = {}
             for i in range(3):
-                u = vector_1[i] * per_clf_precision
-                v = vector_2[i] * per_clf_precision
+                u = vector_1[i] * precision
+                v = vector_2[i] * precision
                 sim = cosine_similarity(u.reshape(1, -1), v.reshape(1, -1))[0, 0]
                 similarities[i] = float(sim)
             return similarities
         else:
-            vector_1 = self.get_vector(per_class=False)  # (1, 3*n+3)
+            vector_1 = self.get_vector(per_class=False)  # (1, 3*n_features)
             vector_2 = second_probe.get_vector(per_class=False)
-            # Layout: [dir0..., dir1..., dir2..., thresh0, thresh1, thresh2]
-            flat_precision = np.concatenate([np.tile(precision, 3), np.ones(3)])
+            flat_precision = np.tile(precision, 3)
             u = vector_1[0] * flat_precision
             v = vector_2[0] * flat_precision
             sim = cosine_similarity(u.reshape(1, -1), v.reshape(1, -1))[0, 0]
@@ -615,12 +694,20 @@ def get_probe_filename(
     probing_task: str,
     extra_iters: int = 0,
     zeroed_out_activation_dims: int = 0,
+    force_original_labels: bool = False,
 ) -> str:
+    """Construct the filename for a saved probe, encoding all training options.
+
+    Optional suffixes are appended in order: extra_iters, zeroed_out_activation_dims,
+    and (for Japanese probes) orig_labels when force_original_labels is True.
+    """
     name = f"{probe_type}_{language}_layer{layer_num}_{probing_task}"
     if extra_iters:
         name += f"_{extra_iters}_extra_iters"
     if zeroed_out_activation_dims:
         name += f"_{zeroed_out_activation_dims}_zeroed_act_dims"
+    if force_original_labels and "jp" in language:
+        name += "_orig_labels"
     return name + ".pkl"
 
 
@@ -649,6 +736,7 @@ def save_probe(
     model_name: str,
     extra_iters: int = 0,
     zeroed_out_activation_dims: int = 0,
+    force_original_labels: bool = False,
 ) -> str:
     """
     Save a probe model to a file.
@@ -676,6 +764,7 @@ def save_probe(
         probing_task,
         extra_iters,
         zeroed_out_activation_dims,
+        force_original_labels,
     )
     filepath: Path = save_dir / filename
 
@@ -696,6 +785,7 @@ def load_probe(
     extra_iters: int = 0,
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
+    force_original_labels: bool = False,
 ) -> AnyProbe:
     """
     Load a probe model from a file.
@@ -708,6 +798,7 @@ def load_probe(
         model_name: Name of the model (e.g., 'olmo_model')
         zeroed_out_activation_dims: Must match the value used when the probe was saved.
         zeroed_out_weight_dims: If > 0, zero out this many highest-magnitude weight dims per class after loading.
+        force_original_labels: If True and language contains 'jp', loads the probe trained with original (non-Japanese) labels.
 
     Returns:
         The loaded probe instance
@@ -720,6 +811,7 @@ def load_probe(
         probing_task,
         extra_iters,
         zeroed_out_activation_dims,
+        force_original_labels,
     )
     filepath: Path = Path(PROBES_FOLDER) / model_name / subfolder / filename
 
@@ -739,6 +831,7 @@ def probe_exists(
     model_name: str,
     extra_iters: int = 0,
     zeroed_out_activation_dims: int = 0,
+    force_original_labels: bool = False,
 ) -> bool:
     """
     Check if a probe file exists.
@@ -750,6 +843,7 @@ def probe_exists(
         probe_type: Type of probe ('lr' or 'mm')
         model_name: Name of the model (e.g., 'olmo_model')
         zeroed_out_activation_dims: Must match the value used when the probe was saved.
+        force_original_labels: If True and language contains 'jp', checks for the probe trained with original labels.
 
     Returns:
         True if the probe file exists, False otherwise
@@ -762,6 +856,7 @@ def probe_exists(
         probing_task,
         extra_iters,
         zeroed_out_activation_dims,
+        force_original_labels,
     )
     filepath: Path = Path(PROBES_FOLDER) / model_name / subfolder / filename
 
@@ -779,7 +874,20 @@ def get_probe(
     hyperparameters_file: str | None = None,
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
+    force_original_labels: bool = False,
 ) -> AnyProbe:
+    """Load a probe from disk or create, save, and return a new one.
+
+    If a saved probe matching all parameters exists and `force_probe_creation` is
+    False, it is loaded directly. Otherwise a new probe is trained on
+    `activation_dataset_train`, saved, and returned.
+
+    For LR probes, hyperparameters are taken from `hyperparameters_file` when
+    provided; otherwise defaults (C=0.01, fit_intercept=True) are used.
+
+    `zeroed_out_weight_dims` is applied after loading or training and is not
+    encoded in the filename, so it does not affect the cached probe on disk.
+    """
     if (not force_probe_creation) and (
         probe_exists(
             language,
@@ -788,6 +896,7 @@ def get_probe(
             probe_type,
             model_name,
             zeroed_out_activation_dims=zeroed_out_activation_dims,
+            force_original_labels=force_original_labels,
         )
     ):
         probe = load_probe(
@@ -798,6 +907,7 @@ def get_probe(
             model_name,
             zeroed_out_activation_dims=zeroed_out_activation_dims,
             zeroed_out_weight_dims=zeroed_out_weight_dims,
+            force_original_labels=force_original_labels,
         )
     else:
         print("Creating probe")
@@ -845,6 +955,7 @@ def get_probe(
             probe_type,
             model_name,
             zeroed_out_activation_dims=zeroed_out_activation_dims,
+            force_original_labels=force_original_labels,
         )
         apply_zeroed_weight_dims(probe, zeroed_out_weight_dims)
 

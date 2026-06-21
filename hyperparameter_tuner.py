@@ -19,10 +19,10 @@ def optimise_hyperparameters(
     Selects the combination maximising macro-averaged F1.
 
     Args:
-        activation_dataset_train: ActivationDataset for training
-        activation_dataset_val: ActivationDataset for validation
+        activation_dataset_train: ActivationDataset for training.
+        activation_dataset_val: ActivationDataset for validation.
         param_grid: Dictionary of hyperparameter names to lists of values.
-                    If None, uses a sensible default grid.
+                    Every combination in the Cartesian product is evaluated.
 
     Returns:
         Dictionary of best hyperparameters found.
@@ -70,19 +70,17 @@ def optimise_hyperparameters_all_layers(
     Optimise hyperparameters independently at each layer for a given model
     and language, using only the standard probing task for tuning.
 
+    ActivationDatasets are constructed internally for the 'train' and 'val' splits
+    at each layer. Only the 'standard' probing task is used for tuning.
+
     Args:
-        model_name: Name of the LLM being probed (e.g., 'olmo_model')
-        language: Language code (e.g., 'en', 'es')
-        num_layers: Total number of layers to tune over
-        get_activation_dataset_fn: Callable with signature
-            (model_name, language, layer_num, split, probing_task)
-            -> ActivationDataset
-            where split is 'train' or 'val' and probing_task is e.g. 'standard'
+        model_name: Name of the LLM being probed (e.g., 'olmo_model').
+        language: Language code (e.g., 'en', 'es').
+        num_layers: Total number of layers to tune over.
         param_grid: Hyperparameter grid passed to optimise_hyperparameters.
-                    If None, uses the default grid.
 
     Returns:
-        Dictionary mapping layer_num -> best hyperparameter dict
+        Dictionary mapping layer_num -> best hyperparameter dict.
     """
     best_params_per_layer: dict[int, dict] = {}
 
