@@ -6,8 +6,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.covariance import ledoit_wolf
 from pathlib import Path
+import os
 import pickle
 import json
+import tempfile
 import numpy as np
 
 from utils import PROBES_FOLDER, PROBE_TYPE_SUBFOLDERS
@@ -350,80 +352,84 @@ class LRProbe:
 
 class MMProbe:
     """
-    Mass-Mean probe for three-class NLI.
+    Mass-mean probe generalised to multiple classes via linear discriminant
+    analysis (LDA).
 
-    Trains three binary mass-mean classifiers:
-      - Classifier 0: entailment (0) vs neutral (1)
-      - Classifier 1: neutral (1) vs contradiction (2)
-      - Classifier 2: entailment (0) vs contradiction (2)
+    This is the natural multi-class extension of the binary mass-mean probe of
+    Marks & Tegmark (2023). Instead of training several one-vs-one binary
+    classifiers and combining their (scale-incomparable) signed margins, we fit a
+    single LDA model sharing one pooled within-class covariance Σ:
 
-    Each classifier computes the difference of class means as its direction vector.
-    Final prediction uses confidence-weighted voting across the three classifiers.
+        δ_k(x) = xᵀ Σ⁻¹ μ_k − ½ μ_kᵀ Σ⁻¹ μ_k        (+ log π_k)
+
+    where μ_k is the mean of class k. The prediction is argmax_k δ_k(x). The Σ⁻¹
+    factor is exactly the "mass-mean correction" of the IID mass-mean probe; here
+    it is shared across all classes so that the K discriminant scores live in the
+    same space and need no per-classifier re-normalisation.
+
+    We use equal priors (the log π_k term is then constant and dropped). This
+    matches both the original mass-mean probe — whose binary decision threshold
+    sits at the midpoint of the two class means — and the
+    `class_weight="balanced"` setting of `LRProbe`.
+
+    The stored per-class weight vectors (`directions`) and `biases` are gauge-fixed
+    to sum to zero across classes. argmax is invariant to adding a common vector to
+    every class's score, so this centring leaves predictions unchanged while giving
+    a canonical representation for cosine-similarity comparisons (mirroring the gauge
+    freedom of multinomial logistic-regression logits).
     """
-
-    # (positive_class, negative_class) for each binary classifier
-    CLASSIFIER_PAIRS: list[tuple[int, int]] = [(0, 1), (1, 2), (0, 2)]
 
     def __init__(
         self,
         directions: list[np.ndarray],
-        thresholds: list[float],
-        feature_std: np.ndarray,
+        biases: np.ndarray,
+        classes: np.ndarray,
         metadata: dict[str, Any] | None = None,
-        optimal_shrinkage: float | None = None,
         zeroed_dims: np.ndarray | None = None,
-        cov_invs: list[np.ndarray] | None = None,
+        cov_inv: np.ndarray | None = None,
+        means: np.ndarray | None = None,
     ) -> None:
         """
         Args:
-            directions: List of 3 unit-norm direction vectors, one per binary classifier.
-            thresholds: List of 3 decision thresholds (midpoint of class means projected onto direction).
-            feature_std: Per-feature standard deviation of training data (used for Mahalanobis similarity).
+            directions: List of K per-class LDA weight vectors w_k = Σ⁻¹ μ_k,
+                gauge-centred to sum to zero across classes.
+            biases: Array of K per-class biases b_k = −½ μ_kᵀ Σ⁻¹ μ_k,
+                gauge-centred to sum to zero across classes.
+            classes: Sorted array of the K class labels, aligned with `directions`.
             metadata: Optional dict with training metadata.
             optimal_shrinkage: Ledoit-Wolf shrinkage coefficient from training data.
             zeroed_dims: Indices of activation dimensions zeroed out during training.
-            cov_invs: List of 3 inverse covariance matrices (d×d), one per binary classifier.
+            cov_inv: Shared precision matrix Σ⁻¹ (d×d) used for Mahalanobis similarity.
+            means: Per-class means μ_k (K×d), kept for reference/diagnostics.
         """
         self.directions = directions
-        self.thresholds = thresholds
-        self.feature_std = feature_std
+        self.biases = np.asarray(biases, dtype=np.float64)
+        self.classes_ = np.asarray(classes)
         self.metadata = metadata
-        self.optimal_shrinkage = optimal_shrinkage
         self.zeroed_dims: np.ndarray | None = zeroed_dims
-        self.cov_invs: list[np.ndarray] | None = cov_invs
+        self.cov_inv: np.ndarray | None = cov_inv
+        self.means: np.ndarray | None = means
 
     def pred(self, x) -> np.ndarray:
         """
-        Predict class labels using confidence-weighted voting across the three binary classifiers.
-
-        Signed scores from each classifier contribute to per-class confidence:
-          class 0 score = s0 + s2  (wins clf0 and clf2)
-          class 1 score = -s0 + s1 (loses clf0, wins clf1)
-          class 2 score = -s1 - s2 (loses clf1 and clf2)
+        Predict class labels via multi-class LDA: argmax_k δ_k(x), where the
+        per-class discriminant is δ_k(x) = xᵀ w_k + b_k with w_k = Σ⁻¹ μ_k and
+        b_k = −½ μ_kᵀ Σ⁻¹ μ_k.
 
         Returns:
-            1D numpy array of predicted class labels (0, 1, or 2).
+            1D numpy array of predicted class labels.
         """
         if isinstance(x, t.Tensor):
             x = x.float().cpu().numpy()
-        x_arr = np.atleast_2d(x)
+        x_arr = np.atleast_2d(x).astype(np.float64)
         if self.zeroed_dims is not None:
             x_arr = x_arr.copy()
             x_arr[:, self.zeroed_dims] = 0.0
 
-        s0 = x_arr @ self.directions[0] - self.thresholds[0]  # ent vs neu
-        s1 = x_arr @ self.directions[1] - self.thresholds[1]  # neu vs contra
-        s2 = x_arr @ self.directions[2] - self.thresholds[2]  # ent vs contra
-
-        class_scores = np.column_stack(
-            [
-                s0 + s2,  # class 0 (entailment)
-                -s0 + s1,  # class 1 (neutral)
-                -s1 - s2,  # class 2 (contradiction)
-            ]
-        )
-
-        return np.argmax(class_scores, axis=1)
+        W = np.asarray(self.directions, dtype=np.float64)  # (K, d)
+        scores = x_arr @ W.T + self.biases  # (m, K)
+        pred_idx = np.argmax(scores, axis=1)
+        return self.classes_[pred_idx]
 
     @staticmethod
     def create_from_data(dataset, zeroed_out_activation_dims: int = 0) -> "MMProbe":
@@ -438,7 +444,9 @@ class MMProbe:
             Fitted MMProbe instance.
         """
         acts, labels = dataset.activations, dataset.labels
-        X = acts.cpu().float().numpy()
+        # float64 throughout: the d×d inverse and the quadratic bias terms are
+        # sensitive to precision, especially for large-magnitude late-layer activations.
+        X = acts.cpu().float().numpy().astype(np.float64)
         y = labels.cpu().float().numpy().astype(int)
 
         zeroed_dims: np.ndarray | None = None
@@ -448,45 +456,39 @@ class MMProbe:
             X = X.copy()
             X[:, zeroed_dims] = 0.0
 
-        directions: list[np.ndarray] = []
-        thresholds: list[float] = []
-        cov_invs: list[np.ndarray] = []
+        classes = np.unique(y)  # sorted class labels, e.g. [0, 1, 2]
+        K = len(classes)
 
-        for pos_class, neg_class in MMProbe.CLASSIFIER_PAIRS:
-            mask = (y == pos_class) | (y == neg_class)
-            X_relevant = X[mask]
-            y_relevant = y[mask]
+        # Per-class means μ_k and the pooled within-class centred data (each point
+        # minus its own class mean). The covariance of the latter is the shared Σ.
+        means = np.zeros((K, X.shape[1]), dtype=np.float64)
+        X_centred = np.empty_like(X)
+        for i, k in enumerate(classes):
+            mask = y == k
+            mu_k = X[mask].mean(axis=0)
+            means[i] = mu_k
+            X_centred[mask] = X[mask] - mu_k
 
-            mean_pos = X_relevant[y_relevant == pos_class].mean(axis=0)
-            mean_neg = X_relevant[y_relevant == neg_class].mean(axis=0)
-
-            # Compute pooled within-class covariance
-            X_pos = X_relevant[y_relevant == pos_class] - mean_pos
-            X_neg = X_relevant[y_relevant == neg_class] - mean_neg
-            X_centred = np.vstack([X_pos, X_neg])
-            cov, shrinkage = ledoit_wolf(X_centred)
-
-            # Apply inverse covariance (the mass-mean correction)
-            # try:
+        # Shared pooled within-class covariance Σ and its inverse (the mass-mean
+        # correction). Ledoit-Wolf shrinkage keeps Σ well-conditioned; pinv is a
+        # safety net in case it is still singular.
+        cov, _ = ledoit_wolf(X_centred)
+        try:
             cov_inv = np.linalg.inv(cov)
-            # except np.linalg.LinAlgError:
-            #     cov_inv = np.linalg.pinv(cov)
+        except np.linalg.LinAlgError:
+            cov_inv = np.linalg.pinv(cov)
 
-            diff = mean_pos - mean_neg
-            direction = cov_inv @ diff
-            norm = np.linalg.norm(direction)
-            direction = direction / norm if norm > 0 else direction
+        # LDA discriminant δ_k(x) = xᵀ(Σ⁻¹ μ_k) − ½ μ_kᵀ Σ⁻¹ μ_k (equal priors).
+        # Σ⁻¹ is symmetric, so row k of (means @ Σ⁻¹) is (Σ⁻¹ μ_k)ᵀ.
+        coefs = means @ cov_inv  # (K, d), w_k = Σ⁻¹ μ_k
+        biases = -0.5 * np.einsum("kd,kd->k", coefs, means)  # −½ μ_kᵀ Σ⁻¹ μ_k
 
-            threshold = float(0.5 * direction @ (mean_pos + mean_neg))
+        # Gauge-fix: centre weights and biases across classes (argmax-invariant).
+        # Must happen after `biases` is computed from the raw coefs above.
+        coefs = coefs - coefs.mean(axis=0, keepdims=True)
+        biases = biases - biases.mean()
 
-            directions.append(direction)
-            thresholds.append(threshold)
-            cov_invs.append(cov_inv.astype(np.float32))
-
-        feature_std = X.std(axis=0)
-        feature_std[feature_std == 0] = 1.0  # prevent division by zero in Mahalanobis
-
-        _, optimal_shrinkage = ledoit_wolf(X)
+        directions = [np.array(coefs[i]) for i in range(K)]
 
         metadata: dict[str, Any] = {
             "language": dataset.language,
@@ -498,12 +500,12 @@ class MMProbe:
 
         return MMProbe(
             directions,
-            thresholds,
-            feature_std,
+            biases,
+            classes,
             metadata,
-            float(optimal_shrinkage),
             zeroed_dims,
-            cov_invs,
+            cov_inv,
+            means,
         )
 
     def refit(self, new_dataset, iterations) -> None:
@@ -514,14 +516,14 @@ class MMProbe:
         Return the probe direction vectors.
 
         Args:
-            per_class: If True, return shape (3, n_features) — one direction per binary classifier.
-                       If False, return shape (1, 3*n_features) — all directions flattened.
+            per_class: If True, return shape (K, n_features) — one LDA weight vector per class.
+                       If False, return shape (1, K*n_features) — all weight vectors flattened.
         """
         if per_class:
-            return np.array(self.directions)  # shape (3, n_features)
+            return np.array(self.directions)  # shape (K, n_features)
         else:
             flattened = np.concatenate(self.directions)
-            return flattened.reshape(1, -1)  # shape (1, 3*n_features)
+            return flattened.reshape(1, -1)  # shape (1, K*n_features)
 
     def calculate_cosine_similarity(
         self, second_probe: "MMProbe", per_class: bool = False
@@ -531,27 +533,21 @@ class MMProbe:
 
         Args:
             second_probe: The other MMProbe to compare with.
-            per_class: If True, return similarity for each binary classifier (keys 0, 1, 2).
+            per_class: If True, return similarity for each class (keys 0..K-1).
                        If False, return similarity for the flattened vectors (key 0).
 
         Returns:
-            Dictionary mapping classifier index (or 0) to cosine similarity value.
+            Dictionary mapping class index (or 0) to cosine similarity value.
         """
-        print("1_thresholds:", self.thresholds)
-        print("2_thresholds:", second_probe.thresholds)
-
-        print("1_directions:", self.directions)
-        print("2_directions:", second_probe.directions)
-
         if per_class:
-            vector_1 = self.get_vector(per_class=True)  # (3, n+1)
+            vector_1 = self.get_vector(per_class=True)  # (K, n_features)
             vector_2 = second_probe.get_vector(per_class=True)
 
             return {
                 i: float(
                     cosine_similarity(vector_1[i : i + 1], vector_2[i : i + 1])[0, 0]
                 )
-                for i in range(3)
+                for i in range(vector_1.shape[0])
             }
         else:
             vector_1 = self.get_vector(per_class=False)
@@ -562,94 +558,52 @@ class MMProbe:
         self,
         second_probe: "MMProbe",
         per_class: bool = False,
-        shrinkage: float | None = None,
     ) -> dict[int, float]:
         """
         Calculate Mahalanobis cosine similarity between this probe and another MMProbe.
 
-        When both probes have stored cov_invs, uses the full precision matrices (average of
-        the two probes' per-classifier inverse covariances). Falls back to a diagonal
-        approximation based on per-feature variances for old probes that lack cov_invs.
-
-        For per_class=False, the flattened-vector similarity is computed with a block-diagonal
-        precision: block_diag(M_0, M_1, M_2), one block per binary classifier.
+        Uses the shared LDA precision matrix M = (Σ⁻¹_self + Σ⁻¹_other) / 2, averaged
+        across the two probes. For per_class=False the flattened-vector similarity uses
+        a block-diagonal precision (the same shared M repeated, one block per class),
+        which is equivalent to summing the per-class numerators and norms.
 
         Args:
             second_probe: The other MMProbe to compare with.
-            per_class: If True, return similarity per binary classifier; if False, flattened.
-            shrinkage: Only used in the diagonal fallback path.
+            per_class: If True, return similarity per class; if False, flattened.
 
         Returns:
-            Dictionary mapping classifier index (or 0) to Mahalanobis cosine similarity.
+            Dictionary mapping class index (or 0) to Mahalanobis cosine similarity.
         """
-        self_cov_invs = getattr(self, "cov_invs", None)
-        other_cov_invs = getattr(second_probe, "cov_invs", None)
-
-        if self_cov_invs is not None and other_cov_invs is not None:
-            if per_class:
-                similarities = {}
-                for i in range(3):
-                    M = (self_cov_invs[i] + other_cov_invs[i]) / 2.0
-                    u = self.directions[i]
-                    v = second_probe.directions[i]
-                    Mu = M @ u
-                    Mv = M @ v
-                    num = float(u @ Mv)
-                    denom = float(np.sqrt((u @ Mu) * (v @ Mv)))
-                    similarities[i] = num / denom if denom > 0 else 0.0
-                return similarities
-            else:
-                num = 0.0
-                u_norm_sq = 0.0
-                v_norm_sq = 0.0
-                for i in range(3):
-                    M = (self_cov_invs[i] + other_cov_invs[i]) / 2.0
-                    u = self.directions[i]
-                    v = second_probe.directions[i]
-                    Mu = M @ u
-                    Mv = M @ v
-                    num += float(u @ Mv)
-                    u_norm_sq += float(u @ Mu)
-                    v_norm_sq += float(v @ Mv)
-                denom = np.sqrt(u_norm_sq * v_norm_sq)
-                return {0: float(num / denom) if denom > 0 else 0.0}
-
-        # Fallback: diagonal approximation using per-feature standard deviations
-        if shrinkage is None:
-            if (
-                self.optimal_shrinkage is not None
-                and second_probe.optimal_shrinkage is not None
-            ):
-                shrinkage = (
-                    self.optimal_shrinkage + second_probe.optimal_shrinkage
-                ) / 2.0
-            else:
-                shrinkage = 0.0
-
-        sigma = self.feature_std * second_probe.feature_std
-        if shrinkage > 0.0:
-            mu = np.mean(sigma)
-            sigma = (1.0 - shrinkage) * sigma + shrinkage * mu
-        precision = 1.0 / np.sqrt(sigma)
-
+        # Shared precision averaged across both probes.
+        M = (
+            np.asarray(self.cov_inv, dtype=np.float64)
+            + np.asarray(second_probe.cov_inv, dtype=np.float64)
+        ) / 2.0
         if per_class:
-            vector_1 = self.get_vector(per_class=True)  # (3, n_features)
-            vector_2 = second_probe.get_vector(per_class=True)
             similarities = {}
-            for i in range(3):
-                u = vector_1[i] * precision
-                v = vector_2[i] * precision
-                sim = cosine_similarity(u.reshape(1, -1), v.reshape(1, -1))[0, 0]
-                similarities[i] = float(sim)
+            for i in range(len(self.directions)):
+                u = self.directions[i]
+                v = second_probe.directions[i]
+                Mu = M @ u
+                Mv = M @ v
+                num = float(u @ Mv)
+                denom = float(np.sqrt((u @ Mu) * (v @ Mv)))
+                similarities[i] = num / denom if denom > 0 else 0.0
             return similarities
         else:
-            vector_1 = self.get_vector(per_class=False)  # (1, 3*n_features)
-            vector_2 = second_probe.get_vector(per_class=False)
-            flat_precision = np.tile(precision, 3)
-            u = vector_1[0] * flat_precision
-            v = vector_2[0] * flat_precision
-            sim = cosine_similarity(u.reshape(1, -1), v.reshape(1, -1))[0, 0]
-            return {0: float(sim)}
+            num = 0.0
+            u_norm_sq = 0.0
+            v_norm_sq = 0.0
+            for i in range(len(self.directions)):
+                u = self.directions[i]
+                v = second_probe.directions[i]
+                Mu = M @ u
+                Mv = M @ v
+                num += float(u @ Mv)
+                u_norm_sq += float(u @ Mu)
+                v_norm_sq += float(v @ Mv)
+            denom = np.sqrt(u_norm_sq * v_norm_sq)
+            return {0: float(num / denom) if denom > 0 else 0.0}
 
     def calculate_l2_dist(
         self, second_probe: "MMProbe", per_class: bool = False
@@ -768,8 +722,21 @@ def save_probe(
     )
     filepath: Path = save_dir / filename
 
-    with open(filepath, "wb") as f:
-        pickle.dump(model, f)
+    # Write atomically (temp file + os.replace) so that concurrent saves of the same
+    # probe never produce a torn/half-written file. When experiments run in parallel,
+    # several workers may save the same base probe (e.g. the language_a probe shared by
+    # multiple language pairs); they write identical content, and the atomic rename
+    # guarantees readers only ever see a complete pickle.
+    fd, tmp_path = tempfile.mkstemp(dir=save_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            pickle.dump(model, f)
+        os.replace(tmp_path, filepath)
+    except BaseException:
+        # Clean up the temp file if anything went wrong before the rename.
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
     print(f"Probe saved to {filepath}")
 

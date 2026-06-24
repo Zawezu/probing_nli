@@ -19,6 +19,7 @@ from utils import (
     LANGUAGE_FULL_NAME_MAP,
     REVERSE_LABEL_MAP,
     get_verbose_version_of_language_string,
+    get_short_version_of_language_string,
 )
 from sick import calculate_majority_class_baseline_f1
 
@@ -529,6 +530,8 @@ def show_plots(
     horizontal_line: str | int = "",
     subplot_titles: list[str] | None = None,
     as_bars: bool = True,
+    print_lines: bool = False,
+    layer_to_print: int | None = None,
 ) -> None:
     """
     Load ExperimentResult files and generate plots grouped by characteristic combinations.
@@ -562,6 +565,10 @@ def show_plots(
             "baseline_f1", or "control_average".
         subplot_titles: Override auto-generated subplot titles; pass [] to suppress all.
         as_bars: If True (default) render grouped bar charts; otherwise render line plots.
+        print_lines: If True, print each line's/bar's attributes and per-layer values as
+            it is added to a plot. Defaults to False.
+        layer_to_print: Only used when print_lines is True. If None (default), all per-layer
+            values are printed; if an integer, only that layer's value is printed per line.
     """
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
@@ -749,6 +756,8 @@ def show_plots(
             legend_position=legend_position,
             horizontal_line=horizontal_line,
             subplot_titles=subplot_titles,
+            print_lines=print_lines,
+            layer_to_print=layer_to_print,
         )
     else:
         plot_metrics_by_group(
@@ -761,6 +770,8 @@ def show_plots(
             legend_position=legend_position,
             horizontal_line=horizontal_line,
             subplot_titles=subplot_titles,
+            print_lines=print_lines,
+            layer_to_print=layer_to_print,
         )
 
 
@@ -815,7 +826,89 @@ LANGUAGE_COLOURS = {
     "es": ["#E5BC1E", "#C5B268"],
     "nl": ["#0752FF", "#6683C3"],
     "jp": ["#00AFCA", "#6CAFB9"],
+    "jp_original_labels": ["#005663", "#263A3D"],
 }
+
+
+def _compute_legend_label(
+    legend_parts: list[str],
+    extra_iter_num: int,
+    is_test_a_base: bool,
+    display_language: str,
+) -> str:
+    """Build the legend label for a single line/bar from its varying-attribute parts.
+
+    Performs the cross-lingual / re-training rewriting (producing short arrow forms like
+    "es→en") so that plot_metrics_by_group and plot_metrics_by_group_as_bars generate
+    identical legend texts. Language parts are expected to already be in short form.
+    """
+    cl_idx = next(
+        (j for j, p in enumerate(legend_parts) if _CROSS_LINGUAL_RE.fullmatch(p)), None
+    )
+    tz_idx = next(
+        (j for j, p in enumerate(legend_parts) if _TEST_Z_RE.fullmatch(p)), None
+    )
+    legend_label = " ".join(legend_parts)
+
+    if cl_idx is not None and tz_idx is not None:
+        cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
+        tz = _TEST_Z_RE.fullmatch(legend_parts[tz_idx])
+        X, Y, raw_Z = cl.group(1), cl.group(2), tz.group(1)  # type: ignore
+        other = [p for j, p in enumerate(legend_parts) if j not in {cl_idx, tz_idx}]
+        if raw_Z == "a":
+            legend_label = " ".join([*other, f"{X}→{Y}→{X}"]).strip()
+        elif raw_Z == "b":
+            legend_label = " ".join([*other, f"{X}→{Y}"]).strip()
+    elif cl_idx is not None and len(legend_parts) == 1 and extra_iter_num > 0:
+        cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
+        X, Y = cl.group(1), cl.group(2)  # type: ignore
+        legend_label = f"{X}→{Y}"
+
+    if is_test_a_base:
+        legend_label = get_short_version_of_language_string(
+            display_language.split("→")[0]
+        )
+
+    return legend_label
+
+
+def _common_origin_title(display_languages: list[str]) -> str | None:
+    """If every line was originally trained in the same language, return the title
+    "originally trained in <language>"; otherwise return None.
+
+    The originally-trained language is the first component of the (display) language
+    key, e.g. "es" for "es→en" or "jp (ol)" for "jp_original_labels→en".
+    """
+    if not display_languages:
+        return None
+    origins = {lang.split("→")[0] for lang in display_languages}
+    if len(origins) == 1:
+        origin = next(iter(origins))
+        return f"originally trained in {get_verbose_version_of_language_string(origin)}"
+    return None
+
+
+def _print_line_info(
+    attrs: dict[str, str],
+    legend_label: str,
+    layers: list[int],
+    values: list[float],
+    layer_to_print: int | None = None,
+) -> None:
+    """Print a single line's/bar's attributes and per-layer values (used when
+    show_plots / the plotting functions are called with print_lines=True).
+
+    If layer_to_print is None, all per-layer values are printed; otherwise only the value
+    of that single layer is printed.
+    """
+    print(f"Line '{legend_label}':")
+    for key, value in attrs.items():
+        print(f"    {key}: {value}")
+    if layer_to_print is None:
+        print(f"    per-layer values: {dict(zip(layers, values))}")
+    else:
+        # Index positionally so negative indices (e.g. -1 for the last layer) work.
+        print(f"    layer {layers[layer_to_print]} value: {values[layer_to_print]}")
 
 
 def plot_metrics_by_group(
@@ -831,6 +924,8 @@ def plot_metrics_by_group(
     sort_lines: bool = False,
     horizontal_line: str | int = "",
     subplot_titles: list[str] | None = None,
+    print_lines: bool = False,
+    layer_to_print: int | None = None,
 ) -> None:
     """
     Plot metrics grouped by experiment groups as line plots over layers.
@@ -855,6 +950,10 @@ def plot_metrics_by_group(
         horizontal_line: Draw a reference line — numeric value, "baseline_f1", or
             "control_average" (renders the control series as a dashed horizontal average).
         subplot_titles: Override auto-generated subplot titles; pass [] to suppress all.
+        print_lines: If True, print each line's attributes and per-layer values as it is
+            added to a plot. Defaults to False.
+        layer_to_print: Only used when print_lines is True. If None (default), all per-layer
+            values are printed; if an integer, only that layer's value is printed per line.
     """
     num_plots: int = len(plots_to_make)
 
@@ -939,6 +1038,10 @@ def plot_metrics_by_group(
 
         # Collect all attributes for each line in this plot
         attrs_per_line: list[dict[str, str]] = []
+        # Short-language variant of the "language" attribute, used for legends
+        short_lang_per_line: list[str] = []
+        # (Display) language keys, used to detect a common originally-trained language
+        display_languages: list[str] = []
 
         for line_request in group_of_line_requests:
             exp_result: ExperimentResult = line_request["exp_result"]
@@ -947,6 +1050,7 @@ def plot_metrics_by_group(
             display_language: str = line_request.get(
                 "language_key", exp_result.language
             )
+            display_languages.append(display_language)
             attrs: dict[str, str] = {
                 "language": get_verbose_version_of_language_string(display_language),
                 "probing_task": exp_result.probing_task,
@@ -968,6 +1072,9 @@ def plot_metrics_by_group(
             for key in attrs.keys():
                 attrs[key] = str(attrs[key]).replace("_", " ")
             attrs_per_line.append(attrs)
+            short_lang_per_line.append(
+                get_short_version_of_language_string(display_language).replace("_", " ")
+            )
 
         # Determine which attributes are common and which vary across all lines
         common_attrs: dict[str, str] = {}
@@ -1004,12 +1111,18 @@ def plot_metrics_by_group(
         else:
             title = f"Results of {', '.join(common_parts)} over the {xlabel}s"
 
-        if subplot_titles is None or (
-            subplot_titles and plot_idx >= len(subplot_titles)
-        ):
-            ax.set_title(title, fontsize=10)
-        elif subplot_titles:
+        # If every line was originally trained in the same language, this title is shown
+        # even when subplot_titles=[] suppresses the verbose fallback titles.
+        common_origin_title = _common_origin_title(display_languages)
+
+        if subplot_titles and plot_idx < len(subplot_titles):
+            # Explicit per-subplot title wins.
             ax.set_title(subplot_titles[plot_idx], fontsize=10)
+        elif common_origin_title is not None:
+            ax.set_title(common_origin_title, fontsize=10)
+        elif subplot_titles is None or subplot_titles:
+            # subplot_titles is None → auto title; non-empty but out of range → fallback.
+            ax.set_title(title, fontsize=10)
         # else subplot_titles == [] → no title
 
         # Prepare line data with average values for sorting
@@ -1025,63 +1138,25 @@ def plot_metrics_by_group(
                 seen_test_a_base = True
             class_id: str = line_request["class_id"]
             class_name: str = line_request["class_name"]
+            display_language: str = line_request.get(
+                "language_key", exp_result.language
+            )
             results: list[float | dict[str, float]] = exp_result.metrics[split][metric]
             layers: list[int] = list(range(len(results)))
 
-            # Generate legend label with only varying attributes
+            # Generate legend label with only varying attributes (short language form)
             legend_parts: list[str] = [
-                attrs_per_line[i][key]
+                short_lang_per_line[i] if key == "language" else attrs_per_line[i][key]
                 for key in attribute_sequence
                 if key in varying_attrs
             ]
 
-            cl_idx = next(
-                (
-                    idx
-                    for idx, p in enumerate(legend_parts)
-                    if _CROSS_LINGUAL_RE.fullmatch(p)
-                ),
-                None,
+            legend_label: str = _compute_legend_label(
+                legend_parts,
+                exp_result.extra_iter_num,
+                is_test_a_base,
+                display_language,
             )
-            tz_idx = next(
-                (idx for idx, p in enumerate(legend_parts) if _TEST_Z_RE.fullmatch(p)),
-                None,
-            )
-
-            legend_label: str = " ".join(legend_parts)
-
-            if cl_idx is not None and tz_idx is not None:
-                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
-                tz = _TEST_Z_RE.fullmatch(legend_parts[tz_idx])
-                X, Y, raw_Z = cl.group(1), cl.group(2), tz.group(1)  # type: ignore
-                if raw_Z == "a":
-                    other_parts = [
-                        p
-                        for j, p in enumerate(legend_parts)
-                        if j not in {cl_idx, tz_idx}
-                    ]
-                    special = f"trained in {X}, re-trained in {Y}, and tested in {X}"
-                    legend_label = " ".join([*other_parts, special]).strip()
-                elif raw_Z == "b":
-                    other_parts = [
-                        p
-                        for j, p in enumerate(legend_parts)
-                        if j not in {cl_idx, tz_idx}
-                    ]
-                    special = f"trained in {X}, re-trained and tested in {Y}"
-                    legend_label = " ".join([*other_parts, special]).strip()
-            elif (
-                cl_idx is not None
-                and len(legend_parts) == 1
-                and exp_result.extra_iter_num > 0
-            ):
-                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
-                X, Y = cl.group(1), cl.group(2)  # type: ignore
-                legend_label = f"trained in {X}, re-trained and tested in {Y}"
-
-            if is_test_a_base:
-                lang_a = exp_result.language.split("→")[0]
-                legend_label = f"trained and tested in {LANGUAGE_FULL_NAME_MAP[lang_a]}"
 
             if "per_class" in metric or "overlapping_idx_amounts" in metric:
                 # If we are dealing with a per-class metric, we add a plot for the requested label id
@@ -1096,6 +1171,15 @@ def plot_metrics_by_group(
                     layers.pop(0)
                     results_for_this_label.pop(0)
 
+                if print_lines:
+                    _print_line_info(
+                        attrs_per_line[i],
+                        legend_label,
+                        layers,
+                        results_for_this_label,
+                        layer_to_print,
+                    )
+
                 lines_to_plot.append(
                     {
                         "layers": layers,
@@ -1105,12 +1189,20 @@ def plot_metrics_by_group(
                         "is_control": "control" in exp_result.probing_task,
                         "is_test_a_base": is_test_a_base,
                         "probing_task": exp_result.probing_task,
-                        "language": exp_result.language,
+                        "language": display_language,
                     }
                 )
             else:
                 # If we are dealing with a non-per-class metric, we simply plot the results
                 average_value: float = float(np.mean(results))  # type: ignore
+                if print_lines:
+                    _print_line_info(
+                        attrs_per_line[i],
+                        legend_label,
+                        layers,
+                        results,  # type: ignore
+                        layer_to_print,
+                    )
                 lines_to_plot.append(
                     {
                         "layers": layers,
@@ -1120,7 +1212,7 @@ def plot_metrics_by_group(
                         "is_control": "control" in exp_result.probing_task,
                         "is_test_a_base": is_test_a_base,
                         "probing_task": exp_result.probing_task,
-                        "language": exp_result.language,
+                        "language": display_language,
                     }
                 )
 
@@ -1233,6 +1325,10 @@ def plot_metrics_by_group(
 
     if show:
         plt.show()
+    else:
+        # The inline backend auto-displays any figure left open at the end of a
+        # cell, so close it explicitly to honor show=False.
+        plt.close(fig)
 
 
 def plot_metrics_by_group_as_bars(
@@ -1244,11 +1340,14 @@ def plot_metrics_by_group_as_bars(
     y_axis_range: tuple[float, float] | None = None,
     legend_position: str = "upper left",
     bins: list[str] | None = None,
-    xlabel: str = "Layer group",
+    xlabel: str = "",
     scale: int = 1,
     sort_lines: bool = False,
     horizontal_line: str | int = "",
     subplot_titles: list[str] | None = None,
+    legend_below_bars: bool = True,
+    print_lines: bool = False,
+    layer_to_print: int | None = None,
 ) -> None:
     """
     Like plot_metrics_by_group but creates grouped bar plots with layer-averaged values.
@@ -1267,19 +1366,26 @@ def plot_metrics_by_group_as_bars(
         filename: Output filename (required when save=True).
         y_axis_range: Fixed (min, max) y-axis range; auto-computed from binned values if None.
         legend_position: Legend location string passed to matplotlib.
-        bins: Labels for the layer bins. Defaults to ["early", "middle", "late"].
-        xlabel: Label for the x-axis (default "Layer group").
+        bins: Labels for the layer bins. Defaults to ["early layers", "middle layers", "late layers"].
+        xlabel: Label for the x-axis (default "").
         scale: Scaling factor applied to the default figure size.
         sort_lines: If True, sort bars within each subplot by descending average value.
         horizontal_line: Draw a reference line — numeric value, "baseline_f1", or
             "control_average" (renders the control series as a dashed horizontal average).
         subplot_titles: Override auto-generated subplot titles; pass [] to suppress all.
+        legend_below_bars: If True (default), omit the usual legend box and instead write
+            each bar's legend label vertically below the bar it belongs to. Repeated bars
+            (same label across bins/lines) each get the label below them.
+        print_lines: If True, print each bar's attributes and per-layer values as it is
+            added to a plot. Defaults to False.
+        layer_to_print: Only used when print_lines is True. If None (default), all per-layer
+            values are printed; if an integer, only that layer's value is printed per bar.
     """
     if (save and not filename) or (filename and not save):
         raise KeyError("save and filename should both be specified or neither")
 
     if bins is None:
-        bins = ["early", "middle", "late"]
+        bins = ["early layers", "middle layers", "late layers"]
 
     num_bins = len(bins)
     num_plots = len(plots_to_make)
@@ -1328,7 +1434,9 @@ def plot_metrics_by_group_as_bars(
         start = 0
         for i in range(num_bins):
             size = base + (1 if i < remainder else 0)
+            # print(start, start+size)
             chunk = values[start : start + size]
+            # print(len(chunk))
             averages.append(float(np.mean(chunk)) if chunk else 0.0)
             start += size
         return averages
@@ -1356,11 +1464,16 @@ def plot_metrics_by_group_as_bars(
 
         # Build per-line attribute dicts for title/legend generation
         attrs_per_line: list[dict[str, str]] = []
+        # Short-language variant of the "language" attribute, used for legends
+        short_lang_per_line: list[str] = []
+        # (Display) language keys, used to detect a common originally-trained language
+        display_languages: list[str] = []
         for line_request in group_of_line_requests:
             exp_result: ExperimentResult = line_request["exp_result"]
             display_language: str = line_request.get(
                 "language_key", exp_result.language
             )
+            display_languages.append(display_language)
             raw_attrs: dict[str, str] = {
                 "language": get_verbose_version_of_language_string(display_language),
                 "probing_task": exp_result.probing_task,
@@ -1379,6 +1492,9 @@ def plot_metrics_by_group_as_bars(
             }
             attrs_per_line.append(
                 {k: v.replace("_", " ") for k, v in raw_attrs.items()}
+            )
+            short_lang_per_line.append(
+                get_short_version_of_language_string(display_language).replace("_", " ")
             )
 
         # Determine which attributes are common vs. varying across all lines
@@ -1409,12 +1525,18 @@ def plot_metrics_by_group_as_bars(
         else:
             title = f"Results of {', '.join(common_parts)} over layer groups"
 
-        if subplot_titles is None or (
-            subplot_titles and plot_idx >= len(subplot_titles)
-        ):
-            ax.set_title(title, fontsize=10)
-        elif subplot_titles:
+        # If every line was originally trained in the same language, this title is shown
+        # even when subplot_titles=[] suppresses the verbose fallback titles.
+        common_origin_title = _common_origin_title(display_languages)
+
+        if subplot_titles and plot_idx < len(subplot_titles):
+            # Explicit per-subplot title wins.
             ax.set_title(subplot_titles[plot_idx], fontsize=10)
+        elif common_origin_title is not None:
+            ax.set_title(common_origin_title, fontsize=10)
+        elif subplot_titles is None or subplot_titles:
+            # subplot_titles is None → auto title; non-empty but out of range → fallback.
+            ax.set_title(title, fontsize=10)
 
         # Collect bar data for each line request
         bars_to_plot: list[dict] = []
@@ -1428,48 +1550,31 @@ def plot_metrics_by_group_as_bars(
                     continue
                 seen_test_a_base = True
 
-            binned = _bin_average(_extract_values(line_request))
+            per_layer_values = _extract_values(line_request)
+            binned = _bin_average(per_layer_values)
+            display_language = line_request.get("language_key", exp_result.language)
 
-            # Legend label — same cross-lingual label rewriting as plot_metrics_by_group
+            # Legend label — shared with plot_metrics_by_group (short language form)
             legend_parts = [
-                attrs_per_line[i][k] for k in attribute_sequence if k in varying_attrs
+                short_lang_per_line[i] if k == "language" else attrs_per_line[i][k]
+                for k in attribute_sequence
+                if k in varying_attrs
             ]
-            cl_idx = next(
-                (
-                    j
-                    for j, p in enumerate(legend_parts)
-                    if _CROSS_LINGUAL_RE.fullmatch(p)
-                ),
-                None,
+            legend_label = _compute_legend_label(
+                legend_parts,
+                exp_result.extra_iter_num,
+                is_test_a_base,
+                display_language,
             )
-            tz_idx = next(
-                (j for j, p in enumerate(legend_parts) if _TEST_Z_RE.fullmatch(p)), None
-            )
-            legend_label = " ".join(legend_parts)
 
-            if cl_idx is not None and tz_idx is not None:
-                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
-                tz = _TEST_Z_RE.fullmatch(legend_parts[tz_idx])
-                X, Y, raw_Z = cl.group(1), cl.group(2), tz.group(1)  # type: ignore
-                other = [
-                    p for j, p in enumerate(legend_parts) if j not in {cl_idx, tz_idx}
-                ]
-                if raw_Z == "a":
-                    legend_label = " ".join([*other, f"{X}→{Y}→{X}"]).strip()
-                elif raw_Z == "b":
-                    legend_label = " ".join([*other, f"{X}→{Y}"]).strip()
-            elif (
-                cl_idx is not None
-                and len(legend_parts) == 1
-                and exp_result.extra_iter_num > 0
-            ):
-                cl = _CROSS_LINGUAL_RE.fullmatch(legend_parts[cl_idx])
-                X, Y = cl.group(1), cl.group(2)  # type: ignore
-                legend_label = f"t{X}→{Y}"
-
-            if is_test_a_base:
-                lang_a = exp_result.language.split("→")[0]
-                legend_label = f"{LANGUAGE_FULL_NAME_MAP[lang_a]}"
+            if print_lines:
+                _print_line_info(
+                    attrs_per_line[i],
+                    legend_label,
+                    list(range(len(per_layer_values))),
+                    per_layer_values,
+                    layer_to_print,
+                )
 
             bars_to_plot.append(
                 {
@@ -1479,7 +1584,7 @@ def plot_metrics_by_group_as_bars(
                     "is_control": "control" in exp_result.probing_task,
                     "is_test_a_base": is_test_a_base,
                     "probing_task": exp_result.probing_task,
-                    "language": exp_result.language,
+                    "language": display_language,
                 }
             )
 
@@ -1518,6 +1623,10 @@ def plot_metrics_by_group_as_bars(
         bar_width_inches = bar_width / num_bins * 7 * scale
         label_fontsize = max(5, min(9, int(bar_width_inches * 72 / (5 * 0.6))))
 
+        # When legend_below_bars is set, the legend label of each bar is written
+        # vertically beneath it instead of in a legend box. Collect (x, label) here.
+        below_bar_labels: list[tuple[float, str]] = []
+
         for i, bar_data in enumerate(bars_to_plot):
             offset = (i - (n_lines - 1) / 2) * bar_width
             colour = bar_data["colour"]
@@ -1550,6 +1659,8 @@ def plot_metrics_by_group_as_bars(
                         fontsize=label_fontsize,
                         color="black",
                     )
+                    if legend_below_bars:
+                        below_bar_labels.append((bin_x, bar_data["legend_label"]))
 
         # Horizontal reference lines
         if horizontal_line == "baseline_f1":
@@ -1586,7 +1697,8 @@ def plot_metrics_by_group_as_bars(
 
         ax.set_xticks(x)
         ax.set_xticklabels(bins)
-        ax.set_xlabel(xlabel)
+        if xlabel:
+            ax.set_xlabel(xlabel)
         ylabel = (
             f"selectivity ({metric[len('marginal_'):].replace('_', ' ')})"
             if metric.startswith("marginal_")
@@ -1594,11 +1706,37 @@ def plot_metrics_by_group_as_bars(
         )
         ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3, axis="y")
-        ax.legend(loc=legend_position, fontsize=7)
         ax.set_ylim(y_axis_range)
+
+        if legend_below_bars:
+            # Write each bar's legend label vertically just below the bar, and push the
+            # bin tick labels and x-axis label further down so they clear the labels.
+            below_fontsize = 10
+            max_label_len = max((len(lbl) for _, lbl in below_bar_labels), default=0)
+            for bin_x, label in below_bar_labels:
+                ax.annotate(
+                    label,
+                    xy=(bin_x, 0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(0, -3),
+                    textcoords="offset points",
+                    rotation=90,
+                    ha="center",
+                    va="top",
+                    fontsize=below_fontsize,
+                )
+            # Approximate vertical extent of the rotated labels (points) and use it to
+            # offset the bin tick labels and x-axis label below them.
+            label_extent_pts = max_label_len * below_fontsize * 0.62 + 6
+            ax.tick_params(axis="x", pad=label_extent_pts)
+            ax.xaxis.labelpad = label_extent_pts + 4
+        else:
+            ax.legend(loc=legend_position, fontsize=7)
 
     for plot_idx in range(num_plots, rows * cols):
         axs[plot_idx // cols, plot_idx % cols].set_visible(False)
+
+    fig.tight_layout()
 
     if save:
         save_dir = Path(PLOTS_FOLDER)
@@ -1606,11 +1744,16 @@ def plot_metrics_by_group_as_bars(
         filepath = save_dir / (
             filename if filename.endswith(".png") else f"{filename}.png"
         )
-        fig.savefig(filepath)  # type: ignore
+        # bbox_inches="tight" ensures the below-bar labels are not clipped.
+        fig.savefig(filepath, bbox_inches="tight")  # type: ignore
         print(f"Plot saved to {filepath}")
 
     if show:
         plt.show()
+    else:
+        # The inline backend auto-displays any figure left open at the end of a
+        # cell, so close it explicitly to honor show=False.
+        plt.close(fig)
 
 
 def plot_confusion_matrix(
@@ -1700,3 +1843,7 @@ def plot_confusion_matrix(
 
     if show:
         plt.show()
+    else:
+        # The inline backend auto-displays any figure left open at the end of a
+        # cell, so close it explicitly to honor show=False.
+        plt.close(fig)

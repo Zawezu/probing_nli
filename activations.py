@@ -4,8 +4,10 @@ from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
 from tqdm import tqdm
 from pathlib import Path
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import sys
 from icecream import ic
 
@@ -22,6 +24,38 @@ from utils import (
 )
 
 device: t.device = t.device("cuda" if t.cuda.is_available() else "cpu")
+
+# Optional in-process LRU cache for merged activation tensors. The same merged .pt
+# file is loaded repeatedly during the experiments (e.g. the control and standard
+# task passes load the identical activations), so caching avoids redundant disk I/O.
+# Disabled by default (size 0) because each tensor can be tens of MB and a large
+# cache may exhaust memory; set MERGED_ACTIVATION_CACHE_SIZE to the number of tensors
+# to keep (e.g. 2 * num_layers to span a full control+standard pass for one language).
+_MERGED_ACTIVATION_CACHE: "OrderedDict[str, Tensor]" = OrderedDict()
+_MERGED_ACTIVATION_CACHE_SIZE: int = int(
+    os.environ.get("MERGED_ACTIVATION_CACHE_SIZE", "0")
+)
+
+
+def _load_merged_activation_tensor(merged_filepath: str) -> Tensor:
+    """Load the activations tensor from a merged .pt file, using an optional LRU cache.
+
+    The returned tensor is shared between callers; downstream probe/prediction code
+    copies it (or only reads from it) before mutating, so sharing is safe.
+    """
+    if _MERGED_ACTIVATION_CACHE_SIZE <= 0:
+        return t.load(merged_filepath, weights_only=True)["activations"]
+
+    cached = _MERGED_ACTIVATION_CACHE.get(merged_filepath)
+    if cached is not None:
+        _MERGED_ACTIVATION_CACHE.move_to_end(merged_filepath)
+        return cached
+
+    activations: Tensor = t.load(merged_filepath, weights_only=True)["activations"]
+    _MERGED_ACTIVATION_CACHE[merged_filepath] = activations
+    while len(_MERGED_ACTIVATION_CACHE) > _MERGED_ACTIVATION_CACHE_SIZE:
+        _MERGED_ACTIVATION_CACHE.popitem(last=False)
+    return activations
 
 
 class SpecialCase:
@@ -530,9 +564,9 @@ class ActivationDataset(Dataset):
         """
         Load activations and labels from a merged activation file.
         """
-        original_dataset: SICKMergedDataset = SICKMergedDataset(
-            self.language, self.split, force_original_labels=self.force_original_labels
-        )
+        # Reuse the dataset already built in __init__ instead of constructing a
+        # second identical one (both parse the same merged SICK data).
+        original_dataset: SICKMergedDataset = self.original_dataset
 
         # Load merged activation file
         merged_filepath: str = f"{get_activations_filepath(self.model_name, self.language, self.split, self.layer_num, None)}_merged.pt"
@@ -544,8 +578,7 @@ class ActivationDataset(Dataset):
                 f"language={self.language}, split={self.split}, layer={self.layer_num}"
             )
 
-        data = t.load(merged_filepath, weights_only=True)
-        activations: Tensor = data["activations"]
+        activations: Tensor = _load_merged_activation_tensor(merged_filepath)
 
         # Get labels for all samples
         num_samples = len(activations)

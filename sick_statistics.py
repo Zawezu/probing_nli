@@ -1,14 +1,20 @@
 import json
 from functools import lru_cache
 
-from janome.tokenizer import Tokenizer as JanomeTokenizer
+from transformers import AutoTokenizer
 
-from utils import MERGED_SICK_FILEPATH, LABEL_MAP
+from utils import MERGED_SICK_FILEPATH, LABEL_MAP, MODELS_FOLDER
+
+# Tokenizer of the Tiny Aya Global model (see activations.py), used to count tokens
+# consistently across all languages.
+_TOKENIZER_MODEL_NAME = "tiny_aya_global"
 
 
 @lru_cache(maxsize=1)
-def _jp_tokenizer() -> JanomeTokenizer:
-    return JanomeTokenizer()
+def _tokenizer():
+    return AutoTokenizer.from_pretrained(
+        f"{MODELS_FOLDER}/{_TOKENIZER_MODEL_NAME}", local_files_only=True
+    )
 
 
 @lru_cache(maxsize=1)
@@ -72,14 +78,12 @@ def label_alignment(language: str) -> float:
     return (matching / total * 100) if total > 0 else 0.0
 
 
-def _tokenize(text: str, language: str) -> list[str]:
-    if language == "jp":
-        return [token.surface for token in _jp_tokenizer().tokenize(text)]  # type: ignore[union-attr]
-    return text.split()
+def _tokenize(text: str) -> list[str]:
+    return _tokenizer().tokenize(text)
 
 
-def _count_words(text: str, language: str) -> int:
-    return len(_tokenize(text, language))
+def _count_tokens(text: str, language: str) -> int:
+    return len(_tokenize(text))
 
 
 def avg_lexical_overlap(language: str, label: str | None = None) -> float:
@@ -99,12 +103,8 @@ def avg_lexical_overlap(language: str, label: str | None = None) -> float:
             continue
         if label_int is not None and entry[label_key] != label_int:
             continue
-        prem_tokens = {
-            t.lower() for t in _tokenize(entry[f"sentence_a_{language}"], language)
-        }
-        hypo_tokens = {
-            t.lower() for t in _tokenize(entry[f"sentence_b_{language}"], language)
-        }
+        prem_tokens = {t.lower() for t in _tokenize(entry[f"sentence_a_{language}"])}
+        hypo_tokens = {t.lower() for t in _tokenize(entry[f"sentence_b_{language}"])}
         union = prem_tokens | hypo_tokens
         if union:
             total_overlap += len(prem_tokens & hypo_tokens) / len(union)
@@ -113,10 +113,11 @@ def avg_lexical_overlap(language: str, label: str | None = None) -> float:
     return (total_overlap / total_samples * 100) if total_samples > 0 else 0.0
 
 
-def avg_words(language: str, part: str, label: str | None = None) -> float:
-    """Average number of words in the premise or hypothesis.
+def avg_tokens(language: str, part: str, label: str | None = None) -> float:
+    """Average number of tokens in the premise or hypothesis.
 
-    Uses Janome morphological tokenization for Japanese; whitespace splitting for all other languages.
+    Uses the Tiny Aya Global model tokenizer for all languages, so token counts are
+    comparable across languages.
     Optionally restricted to pairs with a specific label ('entailment', 'neutral', or 'contradiction').
     """
     data = _load_data()
@@ -126,17 +127,17 @@ def avg_words(language: str, part: str, label: str | None = None) -> float:
     label_key = _standard_label_key(language)
     label_int = LABEL_MAP[label] if label is not None else None
 
-    total_words = 0
+    total_tokens = 0
     total_samples = 0
     for entry in data.values():
         if sentence_key not in entry:
             continue
         if label_int is not None and entry[label_key] != label_int:
             continue
-        total_words += _count_words(entry[sentence_key], language)
+        total_tokens += _count_tokens(entry[sentence_key], language)
         total_samples += 1
 
-    return total_words / total_samples if total_samples > 0 else 0.0
+    return total_tokens / total_samples if total_samples > 0 else 0.0
 
 
 def fill_table() -> None:
@@ -159,22 +160,22 @@ def fill_table() -> None:
     overlap_neu = {lang: avg_lexical_overlap(lang, "neutral") for lang in langs}
     overlap_con = {lang: avg_lexical_overlap(lang, "contradiction") for lang in langs}
 
-    prem = {lang: avg_words(lang, "premise") for lang in langs}
-    hypo = {lang: avg_words(lang, "hypothesis") for lang in langs}
+    prem = {lang: avg_tokens(lang, "premise") for lang in langs}
+    hypo = {lang: avg_tokens(lang, "hypothesis") for lang in langs}
 
-    prem_ent = {lang: avg_words(lang, "premise", "entailment") for lang in langs}
-    prem_neu = {lang: avg_words(lang, "premise", "neutral") for lang in langs}
-    prem_con = {lang: avg_words(lang, "premise", "contradiction") for lang in langs}
-    hypo_ent = {lang: avg_words(lang, "hypothesis", "entailment") for lang in langs}
-    hypo_neu = {lang: avg_words(lang, "hypothesis", "neutral") for lang in langs}
-    hypo_con = {lang: avg_words(lang, "hypothesis", "contradiction") for lang in langs}
+    prem_ent = {lang: avg_tokens(lang, "premise", "entailment") for lang in langs}
+    prem_neu = {lang: avg_tokens(lang, "premise", "neutral") for lang in langs}
+    prem_con = {lang: avg_tokens(lang, "premise", "contradiction") for lang in langs}
+    hypo_ent = {lang: avg_tokens(lang, "hypothesis", "entailment") for lang in langs}
+    hypo_neu = {lang: avg_tokens(lang, "hypothesis", "neutral") for lang in langs}
+    hypo_con = {lang: avg_tokens(lang, "hypothesis", "contradiction") for lang in langs}
 
     def p(v: float) -> str:
         return f"{v:.1f}"
 
     en, es, nl, jp = "en", "es", "nl", "jp"
 
-    print(r"\begin{table}[ht]")
+    print(r"\begin{table}[t]")
     print(r"\centering")
     print(
         r"\caption{Descriptive statistics for the four versions of the SICK dataset. Lexical overlap is the average Jaccard similarity ($|A \cap B| / |A \cup B|$) between the lowercased token sets of each premise-hypothesis pair.}"
@@ -220,9 +221,9 @@ def fill_table() -> None:
     print(
         rf"\quad Contradiction & {p(overlap_con[en])}\% & {p(overlap_con[es])}\% & {p(overlap_con[nl])}\% & {p(overlap_con[jp])}\% \\ \midrule"
     )
-    print(r"\textbf{Word Counts} & & & & \\")
+    print(r"\textbf{Token Counts} & & & & \\")
     print(
-        rf"Avg. Words (Premise) & {p(prem[en])} & {p(prem[es])} & {p(prem[nl])} & {p(prem[jp])} \\"
+        rf"Avg. Tokens (Premise) & {p(prem[en])} & {p(prem[es])} & {p(prem[nl])} & {p(prem[jp])} \\"
     )
     print(
         rf"\quad Entailment & {p(prem_ent[en])} & {p(prem_ent[es])} & {p(prem_ent[nl])} & {p(prem_ent[jp])} \\"
@@ -234,7 +235,7 @@ def fill_table() -> None:
         rf"\quad Contradiction & {p(prem_con[en])} & {p(prem_con[es])} & {p(prem_con[nl])} & {p(prem_con[jp])} \\"
     )
     print(
-        rf"Avg. Words (Hypothesis) & {p(hypo[en])} & {p(hypo[es])} & {p(hypo[nl])} & {p(hypo[jp])} \\"
+        rf"Avg. Tokens (Hypothesis) & {p(hypo[en])} & {p(hypo[es])} & {p(hypo[nl])} & {p(hypo[jp])} \\"
     )
     print(
         rf"\quad Entailment & {p(hypo_ent[en])} & {p(hypo_ent[es])} & {p(hypo_ent[nl])} & {p(hypo_ent[jp])} \\"

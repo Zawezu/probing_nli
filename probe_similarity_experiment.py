@@ -26,14 +26,14 @@ from utils import (
 Path(PLOTS_FOLDER).mkdir(exist_ok=True)
 
 
-def get_similarity_function(probe: AnyProbe, sim_func: str, normalize_l2: bool = True):
+def get_similarity_function(probe: AnyProbe, sim_func: str, normalise_l2: bool = True):
     """
     Return the appropriate similarity function based on sim_func parameter.
 
     Args:
         probe: The AnyProbe instance
         sim_func: Either "cos_sim" or "l2_dist"
-        normalize_l2: If True, normalize probe vectors before computing L2 distance
+        normalise_l2: If True, normalise probe vectors before computing L2 distance
 
     Returns:
         The corresponding method (calculate_cosine_similarity or calculate_l2_dist)
@@ -41,9 +41,9 @@ def get_similarity_function(probe: AnyProbe, sim_func: str, normalize_l2: bool =
     if sim_func == "cos_sim":
         return probe.calculate_cosine_similarity
     elif sim_func == "l2_dist":
-        if normalize_l2 and isinstance(probe, LRProbe):
+        if normalise_l2 and isinstance(probe, LRProbe):
             return lambda other, per_class=False: probe.calculate_l2_dist(
-                other, per_class=per_class, normalize=True
+                other, per_class=per_class, normalise=True
             )
         return probe.calculate_l2_dist
     elif sim_func == "maha_cos_sim":
@@ -54,13 +54,13 @@ def get_similarity_function(probe: AnyProbe, sim_func: str, normalize_l2: bool =
         )
 
 
-def get_similarity_metric_name(sim_func: str, normalize_l2: bool = True) -> str:
+def get_similarity_metric_name(sim_func: str, normalise_l2: bool = True) -> str:
     """
     Get human-readable name for the similarity metric.
 
     Args:
         sim_func: Either "cos_sim" or "l2_dist"
-        normalize_l2: If True, L2 distance label reflects normalisation
+        normalise_l2: If True, L2 distance label reflects normalisation
 
     Returns:
         Human-readable metric name
@@ -68,7 +68,7 @@ def get_similarity_metric_name(sim_func: str, normalize_l2: bool = True) -> str:
     if sim_func == "cos_sim":
         return "Cosine similarity"
     elif sim_func == "l2_dist":
-        return "Normalised euclidean distance" if normalize_l2 else "Euclidean distance"
+        return "Normalised euclidean distance" if normalise_l2 else "Euclidean distance"
     elif sim_func == "maha_cos_sim":
         return "Mahalanobis cosine similarity"
     else:
@@ -120,7 +120,7 @@ def calculate_per_layer_sims_between_langs(
     probe_type: str = "lr",
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
@@ -151,7 +151,7 @@ def calculate_per_layer_sims_between_langs(
                 zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
-            sim_method = get_similarity_function(probe_a, sim_func, normalize_l2)
+            sim_method = get_similarity_function(probe_a, sim_func, normalise_l2)
             sims_dict: dict[int, float] = sim_method(probe_b, per_class=per_class)
 
             # Initialize class keys if needed
@@ -181,7 +181,7 @@ def calculate_per_layer_sims_over_extra_iters(
     probe_type: str = "lr",
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
@@ -217,7 +217,7 @@ def calculate_per_layer_sims_over_extra_iters(
                 zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
-            sim_method = get_similarity_function(original_probe, sim_func, normalize_l2)
+            sim_method = get_similarity_function(original_probe, sim_func, normalise_l2)
             sims_dict: dict[int, float] = sim_method(
                 refitted_probe, per_class=per_class
             )
@@ -326,7 +326,7 @@ def plot_sim_confusion_matrix(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
 ) -> None:
     """
     Plot confusion matrix(ces) of similarities between language pairs.
@@ -365,7 +365,7 @@ def plot_sim_confusion_matrix(
 
         # Plot
         ax = axes[idx]
-        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
+        metric_name = get_similarity_metric_name(sim_func, normalise_l2)
         sns.heatmap(
             matrix,
             xticklabels=languages,  # type: ignore
@@ -405,7 +405,7 @@ def plot_sim_over_the_layers(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
 ) -> None:
     """
     Plot similarity over layers for each language pair.
@@ -464,7 +464,7 @@ def plot_sim_over_the_layers(
             )
 
         ax.set_xlabel("Layer")
-        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
+        metric_name = get_similarity_metric_name(sim_func, normalise_l2)
         ax.set_ylabel(metric_name)
         ax.set_title(f"{lang_a}, {lang_b}")
         ax.grid(True, alpha=0.3)
@@ -504,7 +504,7 @@ def calculate_between_layers_sims(
     probe_type: str = "lr",
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
 ) -> dict[int, dict[str, float]]:
     """
     Calculate similarities between probes at each pair of layers for a single language.
@@ -532,7 +532,7 @@ def calculate_between_layers_sims(
             if layer_a == layer_b:
                 continue
             sim_method = get_similarity_function(
-                probes[layer_a], sim_func, normalize_l2
+                probes[layer_a], sim_func, normalise_l2
             )
             sims_dict: dict[int, float] = sim_method(
                 probes[layer_b], per_class=per_class
@@ -554,7 +554,7 @@ def plot_between_layers_confusion_matrix(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
 ) -> None:
     class_nums = sorted(sims.keys())
     num_classes = len(class_nums)
@@ -579,7 +579,7 @@ def plot_between_layers_confusion_matrix(
             matrix[layer_to_idx[int(layer_a)], layer_to_idx[int(layer_b)]] = value
 
         ax = axes[idx]
-        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
+        metric_name = get_similarity_metric_name(sim_func, normalise_l2)
         layer_labels = [str(layer) for layer in layers]
         has_negatives = vmin < 0.0
         heatmap_kwargs: dict = dict(
@@ -621,9 +621,9 @@ def plot_sim_over_the_layers_two_metrics(
     title: str,
     save: bool,
     show: bool,
-    per_class: bool,
     filename=None,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
+    flip_l2: bool = True,
 ) -> None:
     """
     Plot cosine similarity and L2 distance over layers for one or more probing tasks.
@@ -633,6 +633,9 @@ def plot_sim_over_the_layers_two_metrics(
     Standard tasks use linestyle="-"; tasks whose name contains "control" use linestyle="--"
     with the same colors as the standard task.
     tasks_data: {task_name: (sims_cos, sims_l2)}
+    This function does not support per_class like the others
+    flip_l2: if True (default), the L2 axis is inverted so that up means a lower
+      value and down means a higher value (and the range reflects this).
     """
     if filename is None:
         filename = title
@@ -705,13 +708,16 @@ def plot_sim_over_the_layers_two_metrics(
                     markersize=5,
                     linestyle=linestyle,
                     color=l2_color,
-                    label=f"{get_similarity_metric_name('l2_dist', normalize_l2)} ({task_name})",
+                    label=f"{get_similarity_metric_name('l2_dist', normalise_l2)} ({task_name})",
                 )
 
         ax1.set_xlabel("Layer")
         ax1.set_ylabel("Cosine similarity")
         ax1.set_ylim(0.0, 1.0)
-        ax2.set_ylabel(get_similarity_metric_name("l2_dist", normalize_l2))
+        ax2.set_ylabel(get_similarity_metric_name("l2_dist", normalise_l2))
+        ax2.set_ylim(0.65, 1.4)
+        if flip_l2:
+            ax2.invert_yaxis()
         ax1.set_title(f"{lang_a}, {lang_b}", fontsize=14)
         ax1.grid(True, alpha=0.3)
 
@@ -753,7 +759,7 @@ def plot_sim_over_extra_iters(
     sim_func: str,
     vmin: float = 0.0,
     vmax: float = 1.0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
 ) -> None:
     num_layers: int = len(layer_nums_to_plot)
     n_cols: int = min(3, num_layers)  # Use up to 3 columns
@@ -798,7 +804,7 @@ def plot_sim_over_extra_iters(
             )
 
         ax.set_xlabel("Extra iters", fontsize=8)
-        metric_name = get_similarity_metric_name(sim_func, normalize_l2)
+        metric_name = get_similarity_metric_name(sim_func, normalise_l2)
         ax.set_ylabel(metric_name)
         ax.set_title(f"Layer {layer_num}", fontsize=8)
         ax.grid(True, alpha=0.3)
@@ -836,7 +842,7 @@ def plot_sim_over_layers_at_max_iters(
     per_language_pair: bool,
     vmin: float = 0.0,
     vmax: float = 1.0,
-    normalize_l2: bool = True,
+    normalise_l2: bool = True,
     filename=None,
 ) -> None:
     """
@@ -854,7 +860,7 @@ def plot_sim_over_layers_at_max_iters(
     first_pair_sims = next(iter(first_model_sims.values()))
     layers: list[int] = sorted(first_pair_sims.keys())
     lang_pair_strs: list[str] = list(first_model_sims.keys())
-    metric_name = get_similarity_metric_name(sim_func, normalize_l2)
+    metric_name = get_similarity_metric_name(sim_func, normalise_l2)
 
     if per_language_pair:
         # Place exactly 3 plots in a single row; otherwise approximate a square.
@@ -920,6 +926,9 @@ def plot_sim_over_layers_at_max_iters(
                 )
                 for layer in layers
             ]
+            print(
+                f"{model_name}: (min {min([model_sims[lp][layer][class_num][max_extra_iters] for lp in lang_pair_strs for class_num in class_nums for layer in layers])})"
+            )
             colour = OKABE_ITO_PALETTE[palette_idx % len(OKABE_ITO_PALETTE)]
             label = MODEL_THESIS_NAMES.get(model_name, model_name)
             ax.plot(layers, avg_values, label=label, color=colour, linewidth=3)
@@ -1048,7 +1057,7 @@ if __name__ == "__main__":
     probe_type: str = args.pt
     zeroed_out_activation_dims: int = args.zad
     zeroed_out_weight_dims: int = args.zwd
-    normalize_l2: bool = args.n.lower() == "true" and probe_type == "lr"
+    normalise_l2: bool = args.n.lower() == "true" and probe_type == "lr"
 
     zeroing_suffix: str = ""
     if zeroed_out_activation_dims:
@@ -1093,14 +1102,14 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
-                            normalize_l2=normalize_l2,
+                            normalise_l2=normalise_l2,
                         )
                     )
 
                     print(sims)
 
                     metric_name: str = get_similarity_metric_name(
-                        sim_func, normalize_l2
+                        sim_func, normalise_l2
                     )
 
                     if sim_func == "cos_sim" or sim_func == "maha_cos_sim":
@@ -1143,7 +1152,7 @@ if __name__ == "__main__":
                         sim_func,
                         vmin=vmin,
                         vmax=vmax,
-                        normalize_l2=normalize_l2,
+                        normalise_l2=normalise_l2,
                     )
     elif experiment_type == "per_layer_two_metrics":
         if "-sf" in sys.argv:
@@ -1194,7 +1203,7 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
-                            normalize_l2=normalize_l2,
+                            normalise_l2=normalise_l2,
                         )
                     )
                     tasks_data[probing_task] = (sims_cos, sims_l2)
@@ -1205,9 +1214,8 @@ if __name__ == "__main__":
                     "",
                     save,
                     show,
-                    per_class,
                     filename=f"per_layer_exp_{model_name}",
-                    normalize_l2=normalize_l2,
+                    normalise_l2=normalise_l2,
                 )
     elif experiment_type == "per_extra_iter":
         import pandas as pd
@@ -1242,7 +1250,7 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
-                            normalize_l2=normalize_l2,
+                            normalise_l2=normalise_l2,
                         )
                     )
 
@@ -1253,7 +1261,7 @@ if __name__ == "__main__":
                     else:
                         raise ValueError(f"Unknown sim_func ({sim_func})")
 
-                    metric_name = get_similarity_metric_name(sim_func, normalize_l2)
+                    metric_name = get_similarity_metric_name(sim_func, normalise_l2)
                     layer_nums_to_plot: list[int] = list(sims.keys())[::4]
                     # if save or show:
                     #     plot_sim_over_extra_iters(
@@ -1289,7 +1297,7 @@ if __name__ == "__main__":
             if sims_per_model_per_pair and (save or show):
                 max_extra_iters = num_refits * iterations_per_refit
 
-                metric_name_new = get_similarity_metric_name(sim_func, normalize_l2)
+                metric_name_new = get_similarity_metric_name(sim_func, normalise_l2)
                 plot_sim_over_layers_at_max_iters(
                     sims_per_model_per_pair,
                     max_extra_iters,
@@ -1300,7 +1308,7 @@ if __name__ == "__main__":
                     sim_func,
                     filename=f"cos_sims_after_{max_extra_iters}_iters",
                     per_language_pair=False,
-                    normalize_l2=normalize_l2,
+                    normalise_l2=normalise_l2,
                 )
 
             # Build and print one DataFrame per class
@@ -1337,11 +1345,11 @@ if __name__ == "__main__":
                             probe_type=probe_type,
                             zeroed_out_activation_dims=zeroed_out_activation_dims,
                             zeroed_out_weight_dims=zeroed_out_weight_dims,
-                            normalize_l2=normalize_l2,
+                            normalise_l2=normalise_l2,
                         )
                     )
 
-                    metric_name = get_similarity_metric_name(sim_func, normalize_l2)
+                    metric_name = get_similarity_metric_name(sim_func, normalise_l2)
 
                     all_values: list[float] = [
                         v for d in sims_between.values() for v in d.values()
@@ -1365,7 +1373,7 @@ if __name__ == "__main__":
                         sim_func,
                         vmin=vmin,
                         vmax=vmax,
-                        normalize_l2=normalize_l2,
+                        normalise_l2=normalise_l2,
                     )
     elif experiment_type == "weight_magnitudes":
         for language in languages:

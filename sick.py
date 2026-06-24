@@ -23,6 +23,22 @@ from utils import (
 
 random.seed(42)
 
+# In-process cache of the parsed merged SICK JSON. The file is large and holds
+# every language/split, yet SICKMergedDataset is constructed thousands of times
+# during the experiments (once per layer/split/task/language). Parsing it once and
+# reusing the result is outcome-neutral and removes a large amount of repeated I/O.
+_MERGED_JSON_CACHE: dict[str, dict] = {}
+
+
+def _load_merged_sick_json() -> dict:
+    """Return the parsed merged SICK JSON, reading/parsing it from disk only once."""
+    cached = _MERGED_JSON_CACHE.get(MERGED_SICK_FILEPATH)
+    if cached is None:
+        with open(MERGED_SICK_FILEPATH, "r", encoding="utf-8") as file:
+            cached = json.load(file)
+        _MERGED_JSON_CACHE[MERGED_SICK_FILEPATH] = cached
+    return cached
+
 
 class SICKDirtyDataset(Dataset):
     def __init__(self, language: str, split: str) -> None:
@@ -195,8 +211,7 @@ class SICKMergedDataset(Dataset):
 
     def load_dataset(self) -> None:
         """Read MERGED_SICK_FILEPATH and populate sentence_pairs, labels, and original_ids."""
-        with open(MERGED_SICK_FILEPATH, "r", encoding="utf-8") as file:
-            merged_dataset_dict: dict[str, dict[str, str | int]] = json.load(file)
+        merged_dataset_dict: dict[str, dict[str, str | int]] = _load_merged_sick_json()
 
         for id, values in merged_dataset_dict.items():
             if values["split"] == self.split:
@@ -503,6 +518,8 @@ def create_merged_json(save=False) -> None:
         print(f"Saving merged SICK dataset to {MERGED_SICK_FILEPATH}")
         with open(MERGED_SICK_FILEPATH, "w", encoding="utf-8") as f:
             f.write(json.dumps(merged_dataset_dict, ensure_ascii=False, indent=4))
+        # Invalidate the in-process cache so later reads see the freshly written file.
+        _MERGED_JSON_CACHE.pop(MERGED_SICK_FILEPATH, None)
 
 
 if __name__ == "__main__":

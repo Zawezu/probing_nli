@@ -8,8 +8,8 @@ SICK_FOLDER = "./data/sick"
 SICK_DIRTY_FOLDERS: dict[str, str] = {
     "en": "sick_en",
     "es": "sick_es",
-    "jp": "jsick",
     "nl": "sick_nl",
+    "jp": "jsick",
 }
 SICK_DIRTY_EN_FILE = "SICK_annotated.txt"
 SICK_DIRTY_ES_FILE: dict[str, str] = {
@@ -39,12 +39,12 @@ MODEL_IDS: dict[str, str] = {
 ACTIVATIONS_FOLDER = "./data/activations"
 
 # Other constants
-LANGUAGES: list[str] = ["en", "es", "jp", "nl"]
+LANGUAGES: list[str] = ["en", "es", "nl", "jp"]
 LANGUAGE_FULL_NAME_MAP: dict[str, str] = {
     "en": "English",
     "es": "Spanish",
-    "jp": "Japanese",
     "nl": "Dutch",
+    "jp": "Japanese",
 }
 SPLITS: list[str] = ["train", "test", "val"]
 
@@ -54,7 +54,7 @@ def _verbose_lang_part(part: str) -> str:
     _suffix = "_original_labels"
     if part.endswith(_suffix):
         name = LANGUAGE_FULL_NAME_MAP[part[: -len(_suffix)]]
-        return f"{name} (original labels)"
+        return f"{name} (ol)"
     return LANGUAGE_FULL_NAME_MAP[part]
 
 
@@ -80,6 +80,39 @@ def get_verbose_version_of_language_string(language: str):
             return f"trained in {name_a}, tested in {name_b}"
     else:
         return _verbose_lang_part(language)
+
+
+def _short_lang_part(part: str) -> str:
+    """Return the short code for a single language component, keeping the
+    '_original_labels' marker as a parenthetical (e.g. 'jp (ol)')."""
+    _suffix = "_original_labels"
+    if part.endswith(_suffix):
+        return f"{part[: -len(_suffix)]} (ol)"
+    return part
+
+
+def get_short_version_of_language_string(language: str):
+    """Like get_verbose_version_of_language_string but uses short language codes.
+
+    For a plain code (e.g. 'en') returns the code itself ('en').
+    For a cross-language string like 'en→jp' returns 'trained in en, tested in jp'.
+    When both sides refer to the same language (after stripping '_original_labels')
+    returns 'trained and tested in jp'. The grammar matches the verbose version so the
+    same legend-parsing regexes apply.
+    """
+    if "→" in language:
+        parts: list[str] = language.split("→")
+        _suffix = "_original_labels"
+        bare_a = parts[0][: -len(_suffix)] if parts[0].endswith(_suffix) else parts[0]
+        bare_b = parts[1][: -len(_suffix)] if parts[1].endswith(_suffix) else parts[1]
+        name_a = _short_lang_part(parts[0])
+        name_b = _short_lang_part(parts[1])
+        if bare_a == bare_b:
+            return f"trained and tested in {name_a}"
+        else:
+            return f"trained in {name_a}, tested in {name_b}"
+    else:
+        return _short_lang_part(language)
 
 
 # Experiment constants
@@ -130,8 +163,8 @@ CHAT_TEMPLATES = {
 SYSTEM_PROMPTS = {
     "en": "You are a textual entailment classifier. Always respond with exactly one word: entailment, contradiction, or neutral.",
     "es": "Eres un clasificador de implicación textual. Responde siempre con una sola palabra: implicación, contradicción o neutral.",
-    "jp": "あなたはテキスト含意分類器です。常に一言で答えてください：含意、矛盾、または中立。",
     "nl": "Jij bent een classificator van tekstuele implicaties. Reageer altijd met precies één woord: implicatie, tegenspraak of neutraal.",
+    "jp": "あなたはテキスト含意分類器です。常に一言で答えてください：含意、矛盾、または中立。",
 }
 FEW_SHOT_EXAMPLES = {
     "en": (
@@ -142,13 +175,13 @@ FEW_SHOT_EXAMPLES = {
         "Premisa: Un perro está corriendo.\nHipótesis: Un animal se está moviendo.",
         "implicación",
     ),
-    "jp": (
-        "前提：犬が走っている。\n仮説：動物が動いている。",
-        "含意",
-    ),
     "nl": (
         "Premisse: Een hond rent.\nHypothese: Een dier beweegt.",
         "implicatie",
+    ),
+    "jp": (
+        "前提：犬が走っている。\n仮説：動物が動いている。",
+        "含意",
     ),
 }
 

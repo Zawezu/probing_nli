@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from torch import Tensor
 
 import argparse
@@ -8,6 +8,7 @@ from sklearn.metrics import confusion_matrix
 from activations import ActivationDataset
 from probes import get_probe, save_probe, probe_exists, load_probe
 from experiment_common_code import ExperimentResult
+from parallel_utils import map_combinations
 from utils import (
     LABEL_MAP,
     LANGUAGES,
@@ -256,6 +257,63 @@ def run_full_experiment_2(
     return exp_results
 
 
+def _run_experiment_2_combination(
+    params: dict[str, Any],
+) -> list[ExperimentResult]:
+    """Run both tasks across all refit levels for a single (model, language_pair).
+
+    This is the unit of parallel work: each combination is fully independent, so it can
+    run in its own process. Defined at module level (and taking a single picklable dict)
+    so it can be dispatched to a ProcessPoolExecutor.
+
+    Returns:
+        ExperimentResults for this combination in the order
+        [control_refit0, standard_refit0, control_refit1, standard_refit1, ...].
+    """
+    # Run full experiment on control task
+    control_exp_results: list[ExperimentResult] = run_full_experiment_2(
+        params["language_pair"],
+        params["control_task"],
+        params["probe_type"],
+        params["model_name"],
+        params["force_probe_creation"],
+        params["force_refit_probe_creation"],
+        params["num_refits"],
+        params["num_layers"],
+        params["iterations_per_refit"],
+        zeroed_out_activation_dims=params["zeroed_out_activation_dims"],
+        zeroed_out_weight_dims=params["zeroed_out_weight_dims"],
+        force_original_labels=params["force_original_labels"],
+    )
+
+    # Run full experiment on standard task
+    standard_exp_results: list[ExperimentResult] = run_full_experiment_2(
+        params["language_pair"],
+        params["standard_task"],
+        params["probe_type"],
+        params["model_name"],
+        params["force_probe_creation"],
+        params["force_refit_probe_creation"],
+        params["num_refits"],
+        params["num_layers"],
+        params["iterations_per_refit"],
+        zeroed_out_activation_dims=params["zeroed_out_activation_dims"],
+        zeroed_out_weight_dims=params["zeroed_out_weight_dims"],
+        force_original_labels=params["force_original_labels"],
+    )
+
+    combination_results: list[ExperimentResult] = []
+    for control_exp_result, standard_exp_result in zip(
+        control_exp_results, standard_exp_results
+    ):
+        # Add the marginal metrics (so the difference between standard and control metrics) to the standard experiment result
+        standard_exp_result.add_marginal_metrics(control_exp_result)
+
+        combination_results.extend([control_exp_result, standard_exp_result])
+
+    return combination_results
+
+
 def run_experiment_2(
     language_pairs: list[tuple[str, str]],
     standard_task: str,
@@ -271,6 +329,7 @@ def run_experiment_2(
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
+    num_workers: int | None = None,
 ) -> list[ExperimentResult]:
     """
     Run experiment 2 for all combinations of model names and language pairs.
@@ -280,59 +339,53 @@ def run_experiment_2(
     minus control) are added to each standard result. When force_original_labels is
     True, only pairs involving Japanese are processed. Results are optionally saved.
 
+    Combinations are independent and are run in parallel processes (see `num_workers`);
+    results are identical to a sequential run regardless of the worker count.
+
+    Args:
+        num_workers: Number of worker processes. None or <= 0 means "auto" (one per
+            combination, capped at the CPU count); 1 forces sequential execution.
+
     Returns:
         List of ExperimentResult objects covering all refit levels, tasks, and pairs,
         in the order [control_refit0, standard_refit0, control_refit1, standard_refit1, ...].
     """
-    exp_results: list[ExperimentResult] = []
-
-    # Run the experiment for each combination of model name, language, and probing task
+    # Build the list of independent combinations (model x language_pair).
+    # For the Japanese original label ablation, we only need pairs involving Japanese.
+    combinations: list[dict[str, Any]] = []
     for model_name in model_names:
         for language_pair in language_pairs:
-            # For the Japanese original label ablation, we only need to run the experiments involving Japanese
             if force_original_labels and "jp" not in language_pair:
                 print(f"Skipping {language_pair}")
                 continue
-
-            # Run full experiment on control task
-            control_exp_results: list[ExperimentResult] = run_full_experiment_2(
-                language_pair,
-                control_task,
-                probe_type,
-                model_name,
-                force_probe_creation,
-                force_refit_probe_creation,
-                num_refits,
-                num_layers,
-                iterations_per_refit,
-                zeroed_out_activation_dims=zeroed_out_activation_dims,
-                zeroed_out_weight_dims=zeroed_out_weight_dims,
-                force_original_labels=force_original_labels,
+            combinations.append(
+                {
+                    "model_name": model_name,
+                    "language_pair": language_pair,
+                    "standard_task": standard_task,
+                    "control_task": control_task,
+                    "probe_type": probe_type,
+                    "force_probe_creation": force_probe_creation,
+                    "force_refit_probe_creation": force_refit_probe_creation,
+                    "num_refits": num_refits,
+                    "num_layers": num_layers,
+                    "iterations_per_refit": iterations_per_refit,
+                    "zeroed_out_activation_dims": zeroed_out_activation_dims,
+                    "zeroed_out_weight_dims": zeroed_out_weight_dims,
+                    "force_original_labels": force_original_labels,
+                }
             )
 
-            # Run full experiment on standard task
-            standard_exp_results: list[ExperimentResult] = run_full_experiment_2(
-                language_pair,
-                standard_task,
-                probe_type,
-                model_name,
-                force_probe_creation,
-                force_refit_probe_creation,
-                num_refits,
-                num_layers,
-                iterations_per_refit,
-                zeroed_out_activation_dims=zeroed_out_activation_dims,
-                zeroed_out_weight_dims=zeroed_out_weight_dims,
-                force_original_labels=force_original_labels,
-            )
+    results_per_combination: list[list[ExperimentResult]] = map_combinations(
+        _run_experiment_2_combination, combinations, num_workers
+    )
 
-            for control_exp_result, standard_exp_result in zip(
-                control_exp_results, standard_exp_results
-            ):
-                # Add the marginal metrics (so the difference between standard and control metrics) to the standard experiment result
-                standard_exp_result.add_marginal_metrics(control_exp_result)
-
-                exp_results.extend([control_exp_result, standard_exp_result])
+    # Flatten while preserving order
+    exp_results: list[ExperimentResult] = [
+        exp_result
+        for combination_results in results_per_combination
+        for exp_result in combination_results
+    ]
 
     # Save results if requested
     if save_results:
@@ -391,6 +444,12 @@ if __name__ == "__main__":
         default="False",
         const="True",
     )
+    parser.add_argument(
+        "-j",
+        help="number of worker processes (0 = auto: one per combination capped at CPU count, 1 = sequential)",
+        type=int,
+        default=0,
+    )
 
     args: argparse.Namespace = parser.parse_args()
     print(args)
@@ -407,6 +466,7 @@ if __name__ == "__main__":
     zeroed_out_activation_dims: int = args.zad
     zeroed_out_weight_dims: int = args.zwd
     force_original_labels: bool = args.fol.lower() == "true"
+    num_workers: int = args.j
 
     run_experiment_2(
         language_pairs,
@@ -422,4 +482,5 @@ if __name__ == "__main__":
         zeroed_out_activation_dims=zeroed_out_activation_dims,
         zeroed_out_weight_dims=zeroed_out_weight_dims,
         force_original_labels=force_original_labels,
+        num_workers=num_workers,
     )
