@@ -6,6 +6,7 @@ from tqdm import tqdm
 from pathlib import Path
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+import importlib.util
 import json
 import os
 import sys
@@ -347,6 +348,24 @@ class ActivationRecorder:
                 handle.remove()
             save_executor.shutdown(wait=True)
 
+    @staticmethod
+    def get_attn_implementation() -> str:
+        """Return "flash_attention_2", raising if the package is not installed.
+
+        The flash-attn wheel pinned in pyproject.toml is built for one specific
+        Python/torch/CUDA combination. When it does not match this environment uv skips
+        it silently, so check for it here rather than letting the model load fail with a
+        less specific error.
+        """
+        if importlib.util.find_spec("flash_attn") is None:
+            raise ImportError(
+                "flash_attn is not installed, so activations cannot be generated with "
+                "flash_attention_2. Check that the wheel pinned in pyproject.toml matches "
+                f"this environment (Python {sys.version_info.major}."
+                f"{sys.version_info.minor}, torch {t.__version__}), then run `uv sync`."
+            )
+        return "flash_attention_2"
+
     def load_model(self) -> None:
         """Load the tokenizer and model from a local directory.
 
@@ -366,7 +385,7 @@ class ActivationRecorder:
             model_filepath,
             local_files_only=True,
             dtype=t.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation=self.get_attn_implementation(),
         ).to(device)  # type: ignore
 
         n_layers_txt_filepath: str = get_n_layers_txt_filepath(self.model_name)

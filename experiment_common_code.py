@@ -9,6 +9,7 @@ from matplotlib.pylab import ndarray
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from torch import Tensor
 
@@ -508,6 +509,73 @@ class ExperimentResult:
         filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num, zeroed_out_activation_dims, zeroed_out_weight_dims, force_original_labels)}"
         with open(filepath, "rb") as f:
             return pickle.load(f)
+
+
+def save_to_csv(
+    split: str, metric: str, folder: str, probe_type: str = ""
+) -> str:
+    """
+    Save a CSV file containing one column per experiment pickle in the folder.
+
+    Each column is the list stored in ExperimentResult.metrics[split][metric]
+    for a single pickle file. The resulting CSV is written to the same folder.
+
+    Args:
+        split: The split whose metric series should be exported (e.g. "test").
+        metric: The metric key to export (e.g. "accuracy").
+        folder: Path to the folder containing .pkl experiment results.
+        probe_type: If set, only include .pkl files whose filename contains this probe type.
+
+    Returns:
+        The path to the saved CSV file.
+    """
+    folder_path = Path(folder)
+    if not folder_path.exists():
+        raise FileNotFoundError(f"Folder does not exist: {folder}")
+
+    pkl_files = sorted(folder_path.glob("*.pkl"))
+    if not pkl_files:
+        raise FileNotFoundError(f"No .pkl files found in folder: {folder}")
+
+    filtered_files = [p for p in pkl_files if probe_type in p.name] if probe_type else pkl_files
+    if probe_type and not filtered_files:
+        raise FileNotFoundError(
+            f"No .pkl files with probe_type '{probe_type}' found in folder: {folder}"
+        )
+
+    columns: dict[str, pd.Series] = {}
+    for pkl_path in filtered_files:
+        with open(pkl_path, "rb") as f:
+            experiment_result = pickle.load(f)
+
+        if split not in experiment_result.metrics:
+            print(f"Didn't find split {split} for file {pkl_path.name}")
+            continue
+
+        if metric not in experiment_result.metrics[split]:
+            print(f"Didn't find metric {metric} for file {pkl_path.name}")
+            continue
+
+        values = experiment_result.metrics[split][metric]
+        column_name = pkl_path.stem
+        if probe_type:
+            column_name = column_name.replace(probe_type, "")
+            column_name = column_name.replace(",,", ",")
+            column_name = column_name.strip(",")
+        columns[column_name] = pd.Series(list(values), name=column_name)
+
+    if not columns:
+        raise ValueError(
+            f"No metric values found for split='{split}', metric='{metric}' in folder: {folder}"
+        )
+
+    df = pd.DataFrame(columns)
+    csv_name = f"{split}_{metric}"
+    if probe_type:
+        csv_name = f"{split}_{metric}_{probe_type}"
+    csv_path = folder_path / f"{csv_name}.csv"
+    df.to_csv(csv_path, index_label="layer")
+    return str(csv_path)
 
 
 def show_plots(

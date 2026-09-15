@@ -1,3 +1,4 @@
+import argparse
 import itertools
 from sklearn.metrics import f1_score
 from icecream import ic
@@ -108,6 +109,7 @@ def optimise_hyperparameters_all_layers(
 def save_hyperparameters(
     all_hyperparameters: dict,
     output_file: str = HYPERPARAMETERS_FILEPATH,
+    merge_with_existing: bool = True,
 ) -> str:
     """
     Save aggregated hyperparameters to a JSON file.
@@ -116,6 +118,10 @@ def save_hyperparameters(
         all_hyperparameters: Dictionary with structure:
             {model_name: {language: {layer_num: {hyperparams}}}}
         output_file: Path to save the JSON file
+        merge_with_existing: If True (default), keep the model/language entries that
+            are already in the file and only replace the ones being saved now. This
+            makes it safe to tune a single model (e.g. a newly added one) without
+            discarding the hyperparameters of the models tuned earlier.
 
     Returns:
         Path to the saved file
@@ -131,6 +137,17 @@ def save_hyperparameters(
                 str(layer_num): params for layer_num, params in lang_data.items()
             }
 
+    if merge_with_existing and output_path.exists():
+        with open(output_path, "r") as f:
+            merged_hyperparams: dict = json.load(f)
+
+        # Merge per language rather than per model, so that tuning one language of a
+        # model does not drop the other languages of that same model.
+        for model_name, model_data in serializable_hyperparams.items():
+            merged_hyperparams.setdefault(model_name, {}).update(model_data)
+
+        serializable_hyperparams = merged_hyperparams
+
     with open(output_path, "w") as f:
         json.dump(serializable_hyperparams, f, indent=2)
 
@@ -139,8 +156,13 @@ def save_hyperparameters(
 
 
 if __name__ == "__main__":
-    model_names: list[str] = MODEL_NAMES
-    languages: list[str] = LANGUAGES
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m", help="model names", nargs="*", default=MODEL_NAMES)
+    parser.add_argument("-l", help="languages", nargs="*", default=LANGUAGES)
+    args = parser.parse_args()
+
+    model_names: list[str] = args.m
+    languages: list[str] = args.l
     num_layers: int | None = None
 
     custom = False

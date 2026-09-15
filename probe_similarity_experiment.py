@@ -7,10 +7,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
+import pandas as pd
 
 from probes import AnyProbe, LRProbe, load_probe
 from experiment_common_code import OKABE_ITO_PALETTE
 from utils import (
+    EXPERIMENT_RESULTS_FOLDER,
     LANGUAGES,
     MODEL_NAMES,
     MODEL_THESIS_NAMES,
@@ -615,6 +617,79 @@ def plot_between_layers_confusion_matrix(
     plt.close()
 
 
+def _sanitize_experiment_value(value: Any) -> str:
+    text = str(value).strip().lower()
+    text = text.replace(" ", "_").replace("/", "_").replace("→", "_to_")
+    text = text.replace(",", "_").replace("(", "").replace(")", "")
+    sanitized = "".join(ch if ch.isalnum() else "_" for ch in text)
+    return sanitized.strip("_") or "value"
+
+
+def _build_layerwise_similarity_dataframe(
+    sims: dict[int, dict[int, dict[Any, float]]],
+) -> pd.DataFrame:
+    if not sims:
+        return pd.DataFrame()
+
+    layers = sorted(sims.keys())
+    column_names: list[str] = []
+    seen_columns: set[str] = set()
+
+    for layer in layers:
+        for class_num in sorted(sims[layer].keys()):
+            for pair_key in sorted(sims[layer][class_num].keys()):
+                col_name = f"class_{class_num}__{_sanitize_experiment_value(pair_key)}"
+                if col_name not in seen_columns:
+                    seen_columns.add(col_name)
+                    column_names.append(col_name)
+
+    rows: list[dict[str, float]] = []
+    for layer in layers:
+        row: dict[str, float] = {}
+        for class_num in sorted(sims[layer].keys()):
+            for pair_key in sorted(sims[layer][class_num].keys()):
+                col_name = f"class_{class_num}__{_sanitize_experiment_value(pair_key)}"
+                row[col_name] = sims[layer][class_num][pair_key]
+        rows.append(row)
+
+    df = pd.DataFrame(rows, index=layers)
+    df.index.name = "layer"
+    return df
+
+
+def _save_layerwise_similarity_dataframe(
+    df: pd.DataFrame,   
+    metric_name: str,
+    model_name: str,
+    probing_task: str,
+    probe_type: str,
+    extra_iters: int,
+    per_class: bool,
+    zeroed_out_activation_dims: int,
+    zeroed_out_weight_dims: int,
+    normalise_l2: bool,
+) -> Path:
+    output_dir = (
+        Path(EXPERIMENT_RESULTS_FOLDER) / "probe_similarity" / "per_layer_two_metrics"
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filename_parts = [
+        _sanitize_experiment_value(metric_name),
+        _sanitize_experiment_value(model_name),
+        _sanitize_experiment_value(probing_task),
+        _sanitize_experiment_value(probe_type),
+        f"extra_iters_{extra_iters}",
+        f"per_class_{str(per_class).lower()}",
+        f"zact_{zeroed_out_activation_dims}",
+        f"zw_{zeroed_out_weight_dims}",
+        f"normalise_l2_{str(normalise_l2).lower()}",
+    ]
+    filepath = output_dir / ("_".join(filename_parts) + ".csv")
+    df.to_csv(filepath, index=True)
+    return filepath
+
+
 def plot_sim_over_the_layers_two_metrics(
     tasks_data: dict[str, tuple[dict, dict]],
     language_pairs: list[tuple[str, str]],
@@ -715,7 +790,7 @@ def plot_sim_over_the_layers_two_metrics(
         ax1.set_ylabel("Cosine similarity")
         ax1.set_ylim(0.0, 1.0)
         ax2.set_ylabel(get_similarity_metric_name("l2_dist", normalise_l2))
-        ax2.set_ylim(0.65, 1.4)
+        ax2.set_ylim(0.5, 1.4)
         if flip_l2:
             ax2.invert_yaxis()
         ax1.set_title(f"{lang_a}, {lang_b}", fontsize=14)
@@ -1206,6 +1281,37 @@ if __name__ == "__main__":
                             normalise_l2=normalise_l2,
                         )
                     )
+
+                    cos_sim_df = _build_layerwise_similarity_dataframe(sims_cos)
+                    l2_df = _build_layerwise_similarity_dataframe(sims_l2)
+
+                    cos_csv_path = _save_layerwise_similarity_dataframe(
+                        cos_sim_df,
+                        metric_name="cos_sim",
+                        model_name=model_name,
+                        probing_task=probing_task,
+                        probe_type=probe_type,
+                        extra_iters=extra_iters,
+                        per_class=per_class,
+                        zeroed_out_activation_dims=zeroed_out_activation_dims,
+                        zeroed_out_weight_dims=zeroed_out_weight_dims,
+                        normalise_l2=normalise_l2,
+                    )
+                    l2_csv_path = _save_layerwise_similarity_dataframe(
+                        l2_df,
+                        metric_name="l2_dist",
+                        model_name=model_name,
+                        probing_task=probing_task,
+                        probe_type=probe_type,
+                        extra_iters=extra_iters,
+                        per_class=per_class,
+                        zeroed_out_activation_dims=zeroed_out_activation_dims,
+                        zeroed_out_weight_dims=zeroed_out_weight_dims,
+                        normalise_l2=normalise_l2,
+                    )
+                    print(f"Saved cosine similarity dataframe to {cos_csv_path}")
+                    print(f"Saved L2 dataframe to {l2_csv_path}")
+
                     tasks_data[probing_task] = (sims_cos, sims_l2)
 
                 plot_sim_over_the_layers_two_metrics(

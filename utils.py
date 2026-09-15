@@ -27,12 +27,17 @@ REVERSE_LABEL_MAP: dict[int, str] = {v: k for k, v in LABEL_MAP.items()}
 
 # Model constants
 MODELS_FOLDER = "models"
-MODEL_NAMES: list[str] = ["olmo_model", "tiny_aya_global"]
-MODEL_THESIS_NAMES: dict[str, str] = {"olmo_model": "olmo", "tiny_aya_global": "aya"}
+MODEL_NAMES: list[str] = ["olmo_model", "aya_expanse"]
+MODEL_THESIS_NAMES: dict[str, str] = {
+    "olmo_model": "olmo",
+    "tiny_aya_global": "tiny aya",
+    "aya_expanse": "aya expanse",
+}
 MODEL_IDS: dict[str, str] = {
     # "olmo_model": "allenai/Olmo-3-1025-7B", # This model is not instruction-tuned, so I no longer use it
     "olmo_model": "allenai/Olmo-3-7B-Instruct",  # This is the instruction-tuned version of the same Olmo model
     "tiny_aya_global": "CohereLabs/tiny-aya-global",
+    "aya_expanse": "CohereLabs/aya-expanse-8b",
 }
 
 # Activations constants
@@ -140,6 +145,16 @@ HYPERPARAMETERS_FILEPATH = "./data/hyperparameters/hyperparameters.json"
 
 # Prompt constants
 
+COHERE_CHAT_TEMPLATE: str = (
+    "{{ bos_token }}"
+    "{% for message in messages %}"
+    "{% if message['role'] == 'system' %}<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+    "{% elif message['role'] == 'user' %}<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+    "{% elif message['role'] == 'assistant' %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
+    "{% endif %}{% endfor %}"
+    "{% if add_generation_prompt %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{% endif %}"
+)
+
 CHAT_TEMPLATES = {
     "olmo_model": (
         "{% for message in messages %}"
@@ -149,15 +164,12 @@ CHAT_TEMPLATES = {
         "{% endif %}{% endfor %}"
         "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
     ),
-    "tiny_aya_global": (
-        "{{ bos_token }}"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
-        "{% elif message['role'] == 'user' %}<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
-        "{% elif message['role'] == 'assistant' %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>"
-        "{% endif %}{% endfor %}"
-        "{% if add_generation_prompt %}<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{% endif %}"
-    ),
+    # Tiny Aya Global and Aya Expanse are both Cohere models and use the same turn
+    # tokens, so they share this template. It deliberately leaves out the long default
+    # preamble that ships with these models, so that the only instruction the model
+    # sees is the NLI system prompt.
+    "tiny_aya_global": COHERE_CHAT_TEMPLATE,
+    "aya_expanse": COHERE_CHAT_TEMPLATE,
 }
 
 SYSTEM_PROMPTS = {

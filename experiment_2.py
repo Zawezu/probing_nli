@@ -323,7 +323,7 @@ def run_experiment_2(
     num_refits: int = 0,
     iterations_per_refit: int = 50,
     force_probe_creation: bool = False,
-    force_refit_probe_creation: bool = True,
+    force_refit_probe_creation: bool = False,
     save_results: bool = True,
     num_layers: int | None = None,
     zeroed_out_activation_dims: int = 0,

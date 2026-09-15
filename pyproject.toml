@@ -38,4 +38,14 @@ torch = [
 torchvision = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+# Python 3.13 wheel - incompatible with this project's requires-python (>=3.12,<3.13),
+# so uv silently skips it and flash_attn ends up missing. Kept for reference.
+# flash-attn = { path = "wheels/flash_attn-2.8.3+cu128torch2.10.0cxx11abiTRUE-cp313-cp313-win_amd64.whl" }
+# Same wheel fetched over the network. Its filename advertises the version as
+# 2.8.3+cu130torch2.10.0cxx11abiTRUE, but the METADATA inside it says plain 2.8.3, so uv
+# plans the install from the filename and then reads a different version back, and
+# reinstalls the package on every single sync. Kept for provenance: re-download from here
+# and save it under the local name below, which matches the metadata.
+# flash-attn = { url = "https://huggingface.co/ussoewwin/Flash-Attention-2_for_Windows/resolve/main/flash_attn-2.8.3%2Bcu130torch2.10.0cxx11abiTRUE-cp312-cp312-win_amd64.whl" }
 flash-attn = { path = "wheels/flash_attn-2.8.3-cp312-cp312-win_amd64.whl" }
+

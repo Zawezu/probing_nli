@@ -5,6 +5,7 @@ probes/
 experiment_results/
 plots/
 data/significance_results/
+comparison_bundle/
 
 huggingface_key.txt
 activations_generator.py
