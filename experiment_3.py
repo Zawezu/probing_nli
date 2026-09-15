@@ -232,8 +232,9 @@ class E3DataframeCreator:
         Build and return a DataFrame of F1 metrics from saved experiment 3 results.
 
         Rows are languages (plus optional control/strict variants); columns are metrics
-        (f1, per-class f1 for each label, unknown count, majority class baseline f1).
-        The DataFrame is transposed so languages are rows and metrics are columns.
+        (f1, per-class f1 for each label, percentage of unknown responses, majority class
+        baseline f1). The DataFrame is transposed so languages are rows and metrics are
+        columns.
         """
         self.data: dict[str, Any] = {}
 
@@ -249,17 +250,77 @@ class E3DataframeCreator:
 
         df = df.astype(object)
 
-        df.loc["unk count"] = df.loc["unk count"].astype(int)
+        # Convert the raw unknown count into a percentage of the language's test set size
+        test_set_sizes: dict[str, int] = {
+            language: len(SICKMergedDataset(language, "test"))
+            for language in self.languages
+        }
+        df.loc["unk count"] = [
+            float(df.loc["unk count", column])
+            / test_set_sizes[column.split("_")[0]]
+            * 100
+            for column in df.columns
+        ]
 
         # Transpose so rows=languages, columns=metrics
         df = df.T
+        df = df.rename(columns={"unk count": "% unk"})
 
         # Add majority class baseline F1 as a new column
         df["baseline f1"] = [
-            calculate_majority_class_baseline_f1("standard", lang) for lang in df.index
+            calculate_majority_class_baseline_f1("standard", lang.split("_")[0])
+            for lang in df.index
         ]
 
         return df
+
+    def to_latex(self, df: DataFrame) -> str:
+        """
+        Render the experiment 3 metrics DataFrame as the LaTeX table used in the final
+        paper: abbreviated bold column headers, italicized language row labels, and a
+        `@{}lc...cr@{}` tabular format.
+        """
+        column_rename_map: dict[str, str] = {
+            "f1": "F1",
+            f"f1 for {REVERSE_LABEL_MAP[0]}": "E",
+            f"f1 for {REVERSE_LABEL_MAP[1]}": "N",
+            f"f1 for {REVERSE_LABEL_MAP[2]}": "C",
+            "% unk": r"\% unk",
+            "baseline f1": "MC",
+        }
+        df = df.rename(columns=column_rename_map)
+        df = df.sort_index()
+
+        def format_percent(value: float) -> str:
+            return "0" if value == 0 else f"{value:.2f}"
+
+        def format_two_decimals(value: float) -> str:
+            return f"{float(value):.2f}"
+
+        column_format: str = "@{}l" + "c" * (len(df.columns) - 1) + "r@{}"
+
+        # Bold the column headers and italicize the language row labels by renaming them
+        # directly, rather than via to_latex's `header` argument, since pandas' to_latex
+        # tries to interpret `header` entries as str.format() templates, which breaks on
+        # the curly braces in `\textbf{...}`.
+        df.index = [f"\\textit{{{language}}}" for language in df.index]
+        df.columns = [f"\\textbf{{{column}}}" for column in df.columns]
+
+        # Use per-column formatters (rather than a single float_format) since these
+        # columns retain object dtype from earlier in the pipeline, which to_latex's
+        # float_format does not reliably apply to.
+        formatters: dict[str, Any] = {
+            column: format_percent
+            if column == r"\textbf{\% unk}"
+            else format_two_decimals
+            for column in df.columns
+        }
+
+        return df.to_latex(
+            column_format=column_format,
+            formatters=formatters,
+            escape=False,
+        )
 
     def add_value(self, metric, cls, language, control=False, strict=False):
         """
@@ -323,7 +384,7 @@ class E3DataframeCreator:
             row_name = f"{metric} for {REVERSE_LABEL_MAP[cls]}"
 
         row_name = row_name.replace("_", " ")
-        row_name = row_name.replace("per class", "")
+        row_name = row_name.replace("per class", "").strip()
         self.data[row_name] = {}
 
         for language in self.languages:

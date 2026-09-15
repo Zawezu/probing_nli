@@ -511,9 +511,7 @@ class ExperimentResult:
             return pickle.load(f)
 
 
-def save_to_csv(
-    split: str, metric: str, folder: str, probe_type: str = ""
-) -> str:
+def save_to_csv(split: str, metric: str, folder: str, probe_type: str = "") -> str:
     """
     Save a CSV file containing one column per experiment pickle in the folder.
 
@@ -537,7 +535,9 @@ def save_to_csv(
     if not pkl_files:
         raise FileNotFoundError(f"No .pkl files found in folder: {folder}")
 
-    filtered_files = [p for p in pkl_files if probe_type in p.name] if probe_type else pkl_files
+    filtered_files = (
+        [p for p in pkl_files if probe_type in p.name] if probe_type else pkl_files
+    )
     if probe_type and not filtered_files:
         raise FileNotFoundError(
             f"No .pkl files with probe_type '{probe_type}' found in folder: {folder}"

@@ -658,7 +658,7 @@ def _build_layerwise_similarity_dataframe(
 
 
 def _save_layerwise_similarity_dataframe(
-    df: pd.DataFrame,   
+    df: pd.DataFrame,
     metric_name: str,
     model_name: str,
     probing_task: str,
