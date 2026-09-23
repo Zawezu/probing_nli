@@ -8,7 +8,6 @@ from sklearn.covariance import ledoit_wolf
 from pathlib import Path
 import os
 import pickle
-import json
 import tempfile
 import numpy as np
 
@@ -838,7 +837,6 @@ def get_probe(
     model_name: str,
     activation_dataset_train=None,
     force_probe_creation: bool = False,
-    hyperparameters_file: str | None = None,
     zeroed_out_activation_dims: int = 0,
     zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
@@ -849,8 +847,7 @@ def get_probe(
     False, it is loaded directly. Otherwise a new probe is trained on
     `activation_dataset_train`, saved, and returned.
 
-    For LR probes, hyperparameters are taken from `hyperparameters_file` when
-    provided; otherwise defaults (C=0.01, fit_intercept=True) are used.
+    LR probes always use C=0.01, fit_intercept=True.
 
     `zeroed_out_weight_dims` is applied after loading or training and is not
     encoded in the filename, so it does not affect the cached probe on disk.
@@ -885,16 +882,11 @@ def get_probe(
                         "activation_dataset_train must be specified in order to create a probe"
                     )
 
-                # For default we turn off the hyperparameters. This is because if the probe at each layer or language has different hyperparameters,
-                # it messes up with the cosine similarity comparisons due to the probes working in fundamentally different ways
-                if hyperparameters_file is None:
-                    hyperparams = {"C": 0.01, "fit_intercept": True}
-                else:
-                    hyperparams: dict = load_hyperparameters(
-                        model_name, language, layer_num, hyperparameters_file
-                    )
-                C: float = hyperparams["C"]
-                fit_intercept = hyperparams["fit_intercept"]
+                # Hyperparameters are fixed rather than tuned per layer/language. This is because if the probe
+                # at each layer or language has different hyperparameters, it messes up with the cosine
+                # similarity comparisons due to the probes working in fundamentally different ways
+                C: float = 0.01
+                fit_intercept = True
                 probe: AnyProbe = LRProbe.create_from_data(
                     activation_dataset_train,
                     C,
@@ -927,49 +919,3 @@ def get_probe(
         apply_zeroed_weight_dims(probe, zeroed_out_weight_dims)
 
     return probe
-
-
-def load_hyperparameters(
-    model_name: str,
-    language: str,
-    layer_num: int,
-    hyperparameters_file: str,
-) -> dict:
-    """
-    Load hyperparameters for a specific model, language, and layer.
-
-    Args:
-        model_name: Name of the model (e.g., 'olmo_model')
-        language: Language code (e.g., 'en', 'es')
-        layer_num: Layer number
-        hyperparameters_file: Path to the hyperparameters JSON file
-
-    Returns:
-        Dictionary with hyperparameters (e.g., {'C': 0.1, 'fit_intercept': True})
-
-    Raises:
-        FileNotFoundError: If hyperparameters file doesn't exist
-        KeyError: If the specified model/language/layer combination doesn't exist
-    """
-    filepath = Path(hyperparameters_file)
-
-    if not filepath.exists():
-        raise FileNotFoundError(f"Hyperparameters file not found at {filepath}. ")
-
-    with open(filepath, "r") as f:
-        all_hyperparameters = json.load(f)
-
-    layer_key = str(layer_num)
-
-    if model_name not in all_hyperparameters:
-        raise KeyError(f"Model '{model_name}' not found in hyperparameters")
-    if language not in all_hyperparameters[model_name]:
-        raise KeyError(
-            f"Language '{language}' not found for model '{model_name}' in hyperparameters"
-        )
-    if layer_key not in all_hyperparameters[model_name][language]:
-        raise KeyError(
-            f"Layer {layer_num} not found for {model_name}/{language} in hyperparameters"
-        )
-
-    return all_hyperparameters[model_name][language][layer_key]

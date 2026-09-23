@@ -137,10 +137,6 @@ PROBE_TYPE_FULL_NAME_MAP: dict[str, str] = {
 
 PROBING_TASKS: list[str] = ["standard", "control", "disjunct_control"]
 
-# Hyperparameter constants
-
-HYPERPARAMETERS_FILEPATH = "./data/hyperparameters/hyperparameters.json"
-
 # os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
 
 # Prompt constants
