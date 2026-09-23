@@ -46,7 +46,6 @@ class LRProbe:
         scaler_mean,
         scaler_scale,
         metadata: dict[str, Any] | None = None,
-        optimal_shrinkage: float | None = None,
     ) -> None:
         """
         Initialise LRProbe.
@@ -55,13 +54,11 @@ class LRProbe:
             lr_model: Fitted sklearn LogisticRegression model
             scaler_mean: Mean values from StandardScaler
             scaler_scale: Scale values from StandardScaler
-            optimal_shrinkage: Ledoit-Wolf shrinkage coefficient computed at training time.
         """
         self.lr_model: LogisticRegression = lr_model
         self.scaler_mean: float = scaler_mean
         self.scaler_scale: float = scaler_scale
         self.metadata: dict[str, Any] | None = metadata
-        self.optimal_shrinkage: float | None = optimal_shrinkage
 
     def _normalise(self, x):
         """normalise input using stored scaler parameters."""
@@ -125,15 +122,11 @@ class LRProbe:
             "model_name": dataset.model_name,
         }
 
-        _, optimal_shrinkage = ledoit_wolf(X)
-        optimal_shrinkage = float(optimal_shrinkage)
-
         return LRProbe(
             lr_model,
             scaler.mean_,
             scaler.scale_,
             metadata,
-            optimal_shrinkage,
         )
 
     def refit(self, new_dataset, iterations) -> None:
@@ -206,78 +199,6 @@ class LRProbe:
             vector_1 = self.get_vector(per_class=False)  # shape (1, 3n+3)
             vector_2 = second_lr_probe.get_vector(per_class=False)  # shape (1, 3n+3)
             sim = cosine_similarity(vector_1, vector_2)[0, 0]
-            return {0: sim}
-
-    def calculate_maha_cos_sim(
-        self,
-        second_lr_probe: Any,
-        per_class: bool = False,
-        shrinkage: float | None = None,
-    ) -> dict[int, float]:
-        """
-        Calculate Mahalanobis cosine similarity between this probe and another.
-
-        Uses a diagonal precision matrix whose diagonal entries are
-        1 / (scale_A * scale_B) per feature dimension (geometric-mean variance
-        of the two probes' scalers). Intercept dimensions are left unscaled.
-
-        Args:
-            second_lr_probe: The other LRProbe to compare with
-            per_class: If True, return similarity for each class separately.
-                      If False, return similarity for the flattened vectors as class 0.
-            shrinkage: Ledoit-Wolf shrinkage coefficient in [0, 1]. When None (default),
-                      uses the average of both probes' optimal_shrinkage values computed
-                      at training time (falls back to 0.0 if unavailable). Pass an explicit
-                      float to override.
-
-        Returns:
-            Dictionary mapping class index to Mahalanobis cosine similarity value
-        """
-        if shrinkage is None:
-            if (
-                self.optimal_shrinkage is not None
-                and second_lr_probe.optimal_shrinkage is not None
-            ):
-                shrinkage = (
-                    self.optimal_shrinkage + float(second_lr_probe.optimal_shrinkage)
-                ) / 2.0
-            else:
-                shrinkage = 0.0
-        shrinkage = float(shrinkage)
-
-        sigma = self.scaler_scale * second_lr_probe.scaler_scale
-        if shrinkage > 0.0:
-            mu = np.mean(sigma)
-            sigma = (1.0 - shrinkage) * sigma + shrinkage * mu
-        precision = 1.0 / np.sqrt(sigma)
-
-        if per_class:
-            vector_1 = self.get_vector(
-                per_class=True
-            )  # shape (n_classes, n_features+1)
-            vector_2 = second_lr_probe.get_vector(per_class=True)
-            # Weight features by precision; leave intercept dimension at 1.0
-            per_class_precision = np.concatenate([precision, [1.0]])
-            similarities = {}
-            for i in range(vector_1.shape[0]):
-                u = vector_1[i] * per_class_precision
-                v = vector_2[i] * per_class_precision
-                sim = cosine_similarity(u.reshape(1, -1), v.reshape(1, -1))[0, 0]
-                similarities[int(self.lr_model.classes_[i])] = sim
-            return similarities
-        else:
-            vector_1 = self.get_vector(
-                per_class=False
-            )  # shape (1, n_classes*n_features + n_classes)
-            vector_2 = second_lr_probe.get_vector(per_class=False)
-            # Layout: [class0_feats..., class1_feats..., ..., intercept0, intercept1, ...]
-            n_model_classes = self.lr_model.coef_.shape[0]
-            flat_precision = np.concatenate(
-                [np.tile(precision, n_model_classes), np.ones(n_model_classes)]
-            )
-            u = vector_1[0] * flat_precision
-            v = vector_2[0] * flat_precision
-            sim = cosine_similarity(u.reshape(1, -1), v.reshape(1, -1))[0, 0]
             return {0: sim}
 
     def calculate_l2_dist(
@@ -358,8 +279,6 @@ class MMProbe:
         biases: np.ndarray,
         classes: np.ndarray,
         metadata: dict[str, Any] | None = None,
-        cov_inv: np.ndarray | None = None,
-        means: np.ndarray | None = None,
     ) -> None:
         """
         Args:
@@ -369,16 +288,11 @@ class MMProbe:
                 gauge-centred to sum to zero across classes.
             classes: Sorted array of the K class labels, aligned with `directions`.
             metadata: Optional dict with training metadata.
-            optimal_shrinkage: Ledoit-Wolf shrinkage coefficient from training data.
-            cov_inv: Shared precision matrix Σ⁻¹ (d×d) used for Mahalanobis similarity.
-            means: Per-class means μ_k (K×d), kept for reference/diagnostics.
         """
         self.directions = directions
         self.biases = np.asarray(biases, dtype=np.float64)
         self.classes_ = np.asarray(classes)
         self.metadata = metadata
-        self.cov_inv: np.ndarray | None = cov_inv
-        self.means: np.ndarray | None = means
 
     def pred(self, x) -> np.ndarray:
         """
@@ -462,8 +376,6 @@ class MMProbe:
             biases,
             classes,
             metadata,
-            cov_inv,
-            means,
         )
 
     def refit(self, new_dataset, iterations) -> None:
@@ -511,57 +423,6 @@ class MMProbe:
             vector_1 = self.get_vector(per_class=False)
             vector_2 = second_probe.get_vector(per_class=False)
             return {0: float(cosine_similarity(vector_1, vector_2)[0, 0])}
-
-    def calculate_maha_cos_sim(
-        self,
-        second_probe: "MMProbe",
-        per_class: bool = False,
-    ) -> dict[int, float]:
-        """
-        Calculate Mahalanobis cosine similarity between this probe and another MMProbe.
-
-        Uses the shared LDA precision matrix M = (Σ⁻¹_self + Σ⁻¹_other) / 2, averaged
-        across the two probes. For per_class=False the flattened-vector similarity uses
-        a block-diagonal precision (the same shared M repeated, one block per class),
-        which is equivalent to summing the per-class numerators and norms.
-
-        Args:
-            second_probe: The other MMProbe to compare with.
-            per_class: If True, return similarity per class; if False, flattened.
-
-        Returns:
-            Dictionary mapping class index (or 0) to Mahalanobis cosine similarity.
-        """
-        # Shared precision averaged across both probes.
-        M = (
-            np.asarray(self.cov_inv, dtype=np.float64)
-            + np.asarray(second_probe.cov_inv, dtype=np.float64)
-        ) / 2.0
-        if per_class:
-            similarities = {}
-            for i in range(len(self.directions)):
-                u = self.directions[i]
-                v = second_probe.directions[i]
-                Mu = M @ u
-                Mv = M @ v
-                num = float(u @ Mv)
-                denom = float(np.sqrt((u @ Mu) * (v @ Mv)))
-                similarities[i] = num / denom if denom > 0 else 0.0
-            return similarities
-        else:
-            num = 0.0
-            u_norm_sq = 0.0
-            v_norm_sq = 0.0
-            for i in range(len(self.directions)):
-                u = self.directions[i]
-                v = second_probe.directions[i]
-                Mu = M @ u
-                Mv = M @ v
-                num += float(u @ Mv)
-                u_norm_sq += float(u @ Mu)
-                v_norm_sq += float(v @ Mv)
-            denom = np.sqrt(u_norm_sq * v_norm_sq)
-            return {0: float(num / denom) if denom > 0 else 0.0}
 
     def calculate_l2_dist(
         self, second_probe: "MMProbe", per_class: bool = False

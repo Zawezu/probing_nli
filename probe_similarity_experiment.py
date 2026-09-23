@@ -48,11 +48,9 @@ def get_similarity_function(probe: AnyProbe, sim_func: str, normalise_l2: bool =
                 other, per_class=per_class, normalise=True
             )
         return probe.calculate_l2_dist
-    elif sim_func == "maha_cos_sim":
-        return probe.calculate_maha_cos_sim
     else:
         raise ValueError(
-            f"Unknown similarity function: {sim_func}. Must be 'cos_sim', 'l2_dist', or 'maha_cos_sim'"
+            f"Unknown similarity function: {sim_func}. Must be 'cos_sim' or 'l2_dist'"
         )
 
 
@@ -71,11 +69,9 @@ def get_similarity_metric_name(sim_func: str, normalise_l2: bool = True) -> str:
         return "Cosine similarity"
     elif sim_func == "l2_dist":
         return "Normalised euclidean distance" if normalise_l2 else "Euclidean distance"
-    elif sim_func == "maha_cos_sim":
-        return "Mahalanobis cosine similarity"
     else:
         raise ValueError(
-            f"Unknown similarity function: {sim_func}. Must be 'cos_sim', 'l2_dist', or 'maha_cos_sim'"
+            f"Unknown similarity function: {sim_func}. Must be 'cos_sim' or 'l2_dist'"
         )
 
 
@@ -1057,7 +1053,7 @@ if __name__ == "__main__":
         "-sf",
         help="similarity function to use: cos_sim or l2_dist",
         default="cos_sim",
-        choices=["cos_sim", "l2_dist", "maha_cos_sim"],
+        choices=["cos_sim", "l2_dist"],
     )
 
     parser.add_argument(
@@ -1137,7 +1133,7 @@ if __name__ == "__main__":
                         sim_func, normalise_l2
                     )
 
-                    if sim_func == "cos_sim" or sim_func == "maha_cos_sim":
+                    if sim_func == "cos_sim":
                         # vmin, vmax = 0.0, 1.0
                         vmin, vmax = -1.0, 1.0
                     elif sim_func == "l2_dist":
@@ -1300,9 +1296,7 @@ if __name__ == "__main__":
                         )
                     )
 
-                    if sim_func == "cos_sim" or sim_func == "maha_cos_sim":
-                        vmin, vmax = get_similarity_range(sims)
-                    elif sim_func == "l2_dist":
+                    if sim_func == "cos_sim" or sim_func == "l2_dist":
                         vmin, vmax = get_similarity_range(sims)
                     else:
                         raise ValueError(f"Unknown sim_func ({sim_func})")
@@ -1398,7 +1392,7 @@ if __name__ == "__main__":
                     all_values: list[float] = [
                         v for d in sims_between.values() for v in d.values()
                     ]
-                    if sim_func == "cos_sim" or sim_func == "maha_cos_sim":
+                    if sim_func == "cos_sim":
                         # vmin, vmax = 0.0, 1.0
                         vmin, vmax = -1.0, 1.0
                     else:
