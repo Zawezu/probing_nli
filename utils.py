@@ -193,10 +193,6 @@ FEW_SHOT_EXAMPLES = {
     ),
 }
 
-# Significance results constants
-
-SIGNIFICANCE_RESULTS_FOLDER = "./data/significance_results"
-
 # Miscellaneous functions
 
 
