@@ -125,6 +125,13 @@ EXPERIMENT_RESULTS_FOLDER = "./data/experiment_results"
 PLOTS_FOLDER = "./plots"
 PROBES_FOLDER = "./data/probes"
 
+# Final, paper-ready CSVs (automatically populated by the experiment scripts, see
+# save_to_csv in experiment_common_code.py and the probe_similarity_experiment.py
+# per_layer_two_metrics experiment)
+CSVS_FOLDER = "./data/csvs"
+PROBE_PERFORMANCE_CSVS_FOLDER = f"{CSVS_FOLDER}/probe_performance"
+PROBE_SIMILARITY_CSVS_FOLDER = f"{CSVS_FOLDER}/probe_similarity"
+
 PROBE_TYPE_SUBFOLDERS: dict[str, str] = {
     "lr": "logistic_regression",
     "mm": "mass_mean",

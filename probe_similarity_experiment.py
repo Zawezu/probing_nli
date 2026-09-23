@@ -17,6 +17,7 @@ from utils import (
     MODEL_NAMES,
     MODEL_THESIS_NAMES,
     PLOTS_FOLDER,
+    PROBE_SIMILARITY_CSVS_FOLDER,
     REVERSE_LABEL_MAP,
     get_language_pair_combinations,
     get_number_of_layers_from_file,
@@ -658,6 +659,27 @@ def _save_layerwise_similarity_dataframe(
     return filepath
 
 
+def _save_pipeline_probe_similarity_csv(
+    df: pd.DataFrame,
+    metric_name: str,
+    model_name: str,
+    probing_task: str,
+) -> Path:
+    """
+    Save the paper-ready copy of a layerwise similarity dataframe.
+
+    This is the CSV the results pipeline actually consumes (data/csvs/probe_similarity),
+    named "{similarity_metric}_{model_name}_{probing_task}.csv" as produced by the fixed
+    pipeline configuration (lr probes, no refitting, not per-class).
+    """
+    output_dir = Path(PROBE_SIMILARITY_CSVS_FOLDER)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filepath = output_dir / f"{metric_name}_{model_name}_{probing_task}.csv"
+    df.to_csv(filepath, index=True)
+    return filepath
+
+
 def plot_sim_over_the_layers_two_metrics(
     tasks_data: dict[str, tuple[dict, dict]],
     language_pairs: list[tuple[str, str]],
@@ -1249,6 +1271,15 @@ if __name__ == "__main__":
                     )
                     print(f"Saved cosine similarity dataframe to {cos_csv_path}")
                     print(f"Saved L2 dataframe to {l2_csv_path}")
+
+                    pipeline_cos_csv_path = _save_pipeline_probe_similarity_csv(
+                        cos_sim_df, "cos_sim", model_name, probing_task
+                    )
+                    pipeline_l2_csv_path = _save_pipeline_probe_similarity_csv(
+                        l2_df, "l2_dist", model_name, probing_task
+                    )
+                    print(f"Saved pipeline CSV to {pipeline_cos_csv_path}")
+                    print(f"Saved pipeline CSV to {pipeline_l2_csv_path}")
 
                     tasks_data[probing_task] = (sims_cos, sims_l2)
 

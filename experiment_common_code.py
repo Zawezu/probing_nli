@@ -497,18 +497,26 @@ class ExperimentResult:
             return pickle.load(f)
 
 
-def save_to_csv(split: str, metric: str, folder: str, probe_type: str = "") -> str:
+def save_to_csv(
+    split: str,
+    metric: str,
+    folder: str,
+    probe_type: str = "",
+    output_folder: str | None = None,
+) -> str:
     """
     Save a CSV file containing one column per experiment pickle in the folder.
 
     Each column is the list stored in ExperimentResult.metrics[split][metric]
-    for a single pickle file. The resulting CSV is written to the same folder.
+    for a single pickle file.
 
     Args:
         split: The split whose metric series should be exported (e.g. "test").
         metric: The metric key to export (e.g. "accuracy").
         folder: Path to the folder containing .pkl experiment results.
         probe_type: If set, only include .pkl files whose filename contains this probe type.
+        output_folder: Where to write the CSV. Defaults to `folder` (the pkl folder) if
+            not given.
 
     Returns:
         The path to the saved CSV file.
@@ -559,7 +567,10 @@ def save_to_csv(split: str, metric: str, folder: str, probe_type: str = "") -> s
     csv_name = f"{split}_{metric}"
     if probe_type:
         csv_name = f"{split}_{metric}_{probe_type}"
-    csv_path = folder_path / f"{csv_name}.csv"
+
+    output_folder_path = Path(output_folder) if output_folder else folder_path
+    output_folder_path.mkdir(parents=True, exist_ok=True)
+    csv_path = output_folder_path / f"{csv_name}.csv"
     df.to_csv(csv_path, index_label="layer")
     return str(csv_path)
 
