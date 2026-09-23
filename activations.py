@@ -108,7 +108,6 @@ class ActivationRecorder:
             # We only record the activations if the dictionary does not have an entry for them
             # This ensures that the only activations recorded are those for the first forward pass
             if name not in self.activations.keys():
-                # print("Recording activations")
                 # 'output' is a tuple for some models; we want the first element (the tensor)
                 if isinstance(output, tuple):
                     self.activations[name] = output[0].detach()
@@ -314,9 +313,6 @@ class ActivationRecorder:
                     .decode("utf-8")
                     for ids in generated_ids
                 ]
-
-                # print(f"batch_acts_by_layer[0]:\n{batch_acts_by_layer[0]}")
-                # print(f"batch_acts_by_layer[1]:\n{batch_acts_by_layer[1]}")
 
                 # Save batch and reset
                 if save_to_disk:
@@ -872,6 +868,3 @@ if __name__ == "__main__":
         batch_size,
         special_cases=special_cases,
     )
-
-    # activation_recorder.load_model()
-    # print(activation_recorder.hf_model.model.layers)

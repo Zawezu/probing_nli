@@ -1,6 +1,5 @@
 from itertools import permutations, combinations
 from typing import LiteralString
-# import os
 
 # SICK constants
 SICK_FOLDER = "./data/sick"
@@ -143,8 +142,6 @@ PROBE_TYPE_FULL_NAME_MAP: dict[str, str] = {
 }
 
 PROBING_TASKS: list[str] = ["standard", "control", "disjunct_control"]
-
-# os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
 
 # Prompt constants
 

@@ -327,8 +327,6 @@ def create_disjunct_control_labels(dataset_dict, unique_labels, amount_per_label
         label_ratios[f"{label_excluded}_out"][label_excluded] = 0
     print(f"Label ratios excluding each of the labels: {label_ratios}")
 
-    # print(label_ratios)
-
     for id, values in dataset_dict.items():
         original_label: int = values["standard_label"]
         label_ratios_used: list[float] = list(
@@ -484,8 +482,6 @@ def create_merged_json(save=False) -> None:
             )
 
             for (sentence_a, sentence_b), label, original_id in dataloader:
-                # print(sentence_a, sentence_b, label, original_id, split)
-
                 id = str(original_id.item())
 
                 if id not in seen_ids:
@@ -513,7 +509,6 @@ def create_merged_json(save=False) -> None:
     create_control_labels(merged_dataset_dict, disjunct=False)
     create_control_labels(merged_dataset_dict, disjunct=True)
 
-    # print(merged_dataset_dict)
     if save:
         print(f"Saving merged SICK dataset to {MERGED_SICK_FILEPATH}")
         with open(MERGED_SICK_FILEPATH, "w", encoding="utf-8") as f:
@@ -523,17 +518,6 @@ def create_merged_json(save=False) -> None:
 
 
 if __name__ == "__main__":
-    # create_merged_json(save=True)
-
-    # Sanity tests
-    # for language in LANGUAGES:
-    #     print(language)
-    #     split= "train"
-
-    #     dataset, dataloader = get_dataset_and_dataloader(language, split)
-
-    #     print(dataset.labels[:20])
-
     dataset_en, dataloader_en = get_dataset_and_dataloader("en", "train")
     dataset_jp, dataloader_jp = get_dataset_and_dataloader(
         "jp", "train", force_original_labels=True
@@ -553,8 +537,3 @@ if __name__ == "__main__":
 
     print(f"Differences in standard: {diffs_in_standard}")
     print(f"Differences in control: {diffs_in_control}")
-    # for probing_task in ["standard", "control"]:
-    #     for language in ["en", "jp"]:
-    #         print(
-    #             f"f1 for majority class of {probing_task} {language}: {calculate_majority_class_baseline_f1('standard', 'en')}"
-    #         )

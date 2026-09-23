@@ -58,8 +58,6 @@ def run_full_experiment_1(
 
     # Run a sub-experiment in each layer
     for layer_num in layers:
-        # print(f"Probing at layer {layer_num}")
-
         # Train data
         activation_dataset_train: ActivationDataset = ActivationDataset(
             language,
@@ -110,9 +108,6 @@ def run_full_experiment_1(
 
         # Get test predictions for generating the metrics
         test_preds: Tensor = probe.pred(activation_dataset_test.activations)  # type: ignore
-
-        # print(f"First few test labels: {activation_dataset_test.labels[:20]}")
-        # print(f"First few test preds:  {test_preds}")
 
         # Save confusion matrix of test predictions
         exp_result.append_metric(

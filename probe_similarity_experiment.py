@@ -1163,28 +1163,6 @@ if __name__ == "__main__":
                     else:
                         raise ValueError(f"Unknown sim_func ({sim_func})")
 
-                    # for value in [
-                    #     val
-                    #     for d1 in sims.values()
-                    #     for d2 in d1.values()
-                    #     for val in d2.values()
-                    # ]:
-                    #     if value < 0.0:
-                    #         print(f"Found negative similarity: {value}")
-
-                    # for layer_num in list(sims.keys())[::10]:
-                    #     plot_sim_confusion_matrix(
-                    #         sims,
-                    #         layer_num,
-                    #         f"{metric_name} comparison of {model_name} {probing_task} {probe_type} probes at layer {layer_num} refitted for {extra_iters} iterations with per_class={per_class}",
-                    #         save,
-                    #         show,
-                    #         per_class,
-                    #         sim_func,
-                    #         vmin=vmin,
-                    #         vmax=vmax,
-                    #     )
-
                     plot_sim_over_the_layers(
                         sims,
                         language_pairs,
@@ -1334,18 +1312,6 @@ if __name__ == "__main__":
 
                     metric_name = get_similarity_metric_name(sim_func, normalise_l2)
                     layer_nums_to_plot: list[int] = list(sims.keys())[::4]
-                    # if save or show:
-                    #     plot_sim_over_extra_iters(
-                    #         sims,
-                    #         layer_nums_to_plot,
-                    #         f"{metric_name} over extra iters for {probe_type} {probing_task} probes of {model_name} on the {probing_task} {language_pair} task at different layers with per_class={per_class}",
-                    #         save,
-                    #         show,
-                    #         per_class,
-                    #         sim_func,
-                    #         vmin=vmin,
-                    #         vmax=vmax,
-                    #     )
 
                     # Accumulate similarity at max extra_iters, averaged across layers
                     lang_pair_str = f"{language_pair[0]}→{language_pair[1]}"

@@ -394,12 +394,9 @@ class ExperimentResult:
                     idxs_for_this_cell_prev_layer: set[int] = (
                         idxs_prev_layer[key] if key in idxs_prev_layer.keys() else set()
                     )
-                    # print(f"idxs_for_this_cell:\n{idxs_for_this_cell}")
-                    # print(f"idxs_prev_layer[key]:\n{idxs_for_this_cell_prev_layer}")
                     common_idxs: set = idxs_for_this_cell.intersection(
                         idxs_for_this_cell_prev_layer
                     )
-                    # print(common_idxs)
                     overlapping_idxs[key] = common_idxs
                     overlapping_idx_amounts[key] = len(common_idxs)
 

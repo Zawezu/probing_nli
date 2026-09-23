@@ -74,9 +74,6 @@ class Response:
         question_parts: list[str] = full_question.split("\n")
         sentence_a: str = question_parts[0].split(sentence_split_char)[1].strip()
         sentence_b: str = question_parts[1].split(sentence_split_char)[1].strip()
-        # print("----------------")
-        # print(f"sentence_a = {sentence_a}")
-        # print(f"sentence_b = {sentence_b}")
 
         self.sentence_pair: tuple[str, str] = (sentence_a, sentence_b)
         self.response: str = response_dict["response"].strip().lower()
@@ -93,8 +90,7 @@ class Response:
         for label, expected in valid_responses.items():
             if self.response == expected:
                 return LABEL_MAP[label]
-        # if self.label != -1:
-        #     print(f'Lenient accepted but strict rejected: "{self.response}"')
+
         return -1
 
     def parse_label_from_response(self) -> int:
@@ -112,7 +108,6 @@ class Response:
         no_in_aswer: bool = "no" in self.response or "ない" in self.response
         if no_in_aswer:
             # If "no" is found in the answer, we automatically mark it as unknown label, since "no" makes the response ambiguous
-            # print('Found "no". Returning unknown')
             return -1
 
         for label in LABEL_MAP.keys():
@@ -126,13 +121,11 @@ class Response:
         ]
         if len(nonzero_labels) != 1:
             # If there is not exactly one label found, mark it as unknown label
-            # print(f'Found {"zero" if len(nonzero_labels) == 0 else "multiple"} labels {nonzero_labels}: {self.response}. Returning unknown')
 
             return -1
 
         label: str = nonzero_labels[0]
         label_id: int = LABEL_MAP[label]
-        # print(f"Found {label_found_counts[label]} instances of {label}. Returning {label_id}")
         return label_id
 
 
@@ -166,8 +159,6 @@ class ResponseDataset(Dataset):
         batch_files: list[Path] = sorted(
             directory.glob(pattern), key=lambda p: int(p.stem.split("_batch")[1])
         )
-
-        # print(batch_files)
 
         self.responses: list[Response] = []
         self.response_counts = {}
@@ -503,9 +494,6 @@ def run_full_experiment(
     exp_result.append_metric("train", "unk_count", get_unk_count(exp_result, "train"))
     exp_result.append_metric("test", "unk_count", get_unk_count(exp_result, "test"))
 
-    # print(confusion_matrix(train_labels, train_preds))
-
-    # print(exp_result.metrics)
     return exp_result
 
 
@@ -571,4 +559,3 @@ if __name__ == "__main__":
     exp_result = ExperimentResult.get_from_file(
         3, "en", "standard", "model_pred", "olmo_model"
     )
-    # print(exp_result.metrics)
