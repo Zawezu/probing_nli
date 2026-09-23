@@ -34,8 +34,6 @@ def run_full_experiment_2(
     num_layers: int | None,
     iterations_per_refit: int,
     save_refitted_probes: bool = True,
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
 ) -> list[ExperimentResult]:
     """
@@ -67,8 +65,6 @@ def run_full_experiment_2(
             probe_type,
             model_name,
             refit_num * iterations_per_refit,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
-            zeroed_out_weight_dims=zeroed_out_weight_dims,
             force_original_labels=force_original_labels,
         )
         for refit_num in range(num_refits)
@@ -128,8 +124,6 @@ def run_full_experiment_2(
             model_name,
             activation_dataset_train=activation_dataset_train_a,
             force_probe_creation=force_probe_creation,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
-            zeroed_out_weight_dims=zeroed_out_weight_dims,
             force_original_labels=force_original_labels,
         )
 
@@ -158,7 +152,6 @@ def run_full_experiment_2(
                     probe_type,
                     model_name,
                     extra_iters,
-                    zeroed_out_activation_dims,
                     force_original_labels=force_original_labels,
                 ):
                     probe = load_probe(
@@ -168,8 +161,6 @@ def run_full_experiment_2(
                         probe_type,
                         model_name,
                         refit_num * iterations_per_refit,
-                        zeroed_out_activation_dims=zeroed_out_activation_dims,
-                        zeroed_out_weight_dims=zeroed_out_weight_dims,
                         force_original_labels=force_original_labels,
                     )
                 else:
@@ -186,7 +177,6 @@ def run_full_experiment_2(
                             probe_type,
                             model_name,
                             extra_iters,
-                            zeroed_out_activation_dims=zeroed_out_activation_dims,
                             force_original_labels=force_original_labels,
                         )
 
@@ -281,8 +271,6 @@ def _run_experiment_2_combination(
         params["num_refits"],
         params["num_layers"],
         params["iterations_per_refit"],
-        zeroed_out_activation_dims=params["zeroed_out_activation_dims"],
-        zeroed_out_weight_dims=params["zeroed_out_weight_dims"],
         force_original_labels=params["force_original_labels"],
     )
 
@@ -297,8 +285,6 @@ def _run_experiment_2_combination(
         params["num_refits"],
         params["num_layers"],
         params["iterations_per_refit"],
-        zeroed_out_activation_dims=params["zeroed_out_activation_dims"],
-        zeroed_out_weight_dims=params["zeroed_out_weight_dims"],
         force_original_labels=params["force_original_labels"],
     )
 
@@ -326,8 +312,6 @@ def run_experiment_2(
     force_refit_probe_creation: bool = False,
     save_results: bool = True,
     num_layers: int | None = None,
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
     num_workers: int | None = None,
 ) -> list[ExperimentResult]:
@@ -370,8 +354,6 @@ def run_experiment_2(
                     "num_refits": num_refits,
                     "num_layers": num_layers,
                     "iterations_per_refit": iterations_per_refit,
-                    "zeroed_out_activation_dims": zeroed_out_activation_dims,
-                    "zeroed_out_weight_dims": zeroed_out_weight_dims,
                     "force_original_labels": force_original_labels,
                 }
             )
@@ -426,18 +408,6 @@ if __name__ == "__main__":
         const="True",
     )
     parser.add_argument(
-        "-zad",
-        help="number of highest-magnitude activation dims to zero out before training (0 = disabled)",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "-zwd",
-        help="number of highest-magnitude weight dims to zero out per class after loading (0 = disabled)",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
         "-fol",
         help="force original (non-Japanese) labels for Japanese data",
         nargs="?",
@@ -463,8 +433,6 @@ if __name__ == "__main__":
     iterations_per_refit: int = args.ir
     force_probe_creation: bool = args.f.lower() == "true"
     save_results: bool = args.sr.lower() == "true"
-    zeroed_out_activation_dims: int = args.zad
-    zeroed_out_weight_dims: int = args.zwd
     force_original_labels: bool = args.fol.lower() == "true"
     num_workers: int = args.j
 
@@ -479,8 +447,6 @@ if __name__ == "__main__":
         force_probe_creation=force_probe_creation,
         num_layers=num_layers,
         save_results=save_results,
-        zeroed_out_activation_dims=zeroed_out_activation_dims,
-        zeroed_out_weight_dims=zeroed_out_weight_dims,
         force_original_labels=force_original_labels,
         num_workers=num_workers,
     )

@@ -47,7 +47,6 @@ class LRProbe:
         scaler_scale,
         metadata: dict[str, Any] | None = None,
         optimal_shrinkage: float | None = None,
-        zeroed_dims: np.ndarray | None = None,
     ) -> None:
         """
         Initialise LRProbe.
@@ -57,29 +56,21 @@ class LRProbe:
             scaler_mean: Mean values from StandardScaler
             scaler_scale: Scale values from StandardScaler
             optimal_shrinkage: Ledoit-Wolf shrinkage coefficient computed at training time.
-            zeroed_dims: Indices of activation dimensions zeroed out during training.
         """
         self.lr_model: LogisticRegression = lr_model
         self.scaler_mean: float = scaler_mean
         self.scaler_scale: float = scaler_scale
         self.metadata: dict[str, Any] | None = metadata
         self.optimal_shrinkage: float | None = optimal_shrinkage
-        self.zeroed_dims: np.ndarray | None = zeroed_dims
 
     def _normalise(self, x):
-        """normalise input using stored scaler parameters, then zero out stored dims."""
+        """normalise input using stored scaler parameters."""
         if isinstance(x, t.Tensor):
             x = x.float().cpu().numpy()
         if self.scaler_mean is not None and self.scaler_scale is not None:
             result = (x - self.scaler_mean) / self.scaler_scale
         else:
             result = np.asarray(x, dtype=float)
-        if self.zeroed_dims is not None:
-            result = result.copy()
-            if result.ndim == 2:
-                result[:, self.zeroed_dims] = 0.0
-            else:
-                result[self.zeroed_dims] = 0.0
         return result
 
     def pred(self, x):
@@ -96,9 +87,7 @@ class LRProbe:
         return self.lr_model.predict(normalised)
 
     @staticmethod
-    def create_from_data(
-        dataset, C, fit_intercept, zeroed_out_activation_dims: int = 0
-    ) -> "LRProbe":
+    def create_from_data(dataset, C, fit_intercept) -> "LRProbe":
         """
         Create LRProbe from an activation dataset.
 
@@ -106,7 +95,6 @@ class LRProbe:
             dataset: ActivationDataset with activations and labels.
             C: Inverse of regularisation strength for LogisticRegression.
             fit_intercept: Whether to fit a bias term in the logistic regression.
-            zeroed_out_activation_dims: Number of highest-average-magnitude dims to zero out before training.
 
         Returns:
             Fitted LRProbe instance.
@@ -115,17 +103,8 @@ class LRProbe:
         X = acts.cpu().float().numpy()
         y = labels.cpu().float().numpy()
 
-        zeroed_dims: np.ndarray | None = None
-        if zeroed_out_activation_dims > 0:
-            avg_magnitudes = np.abs(X).mean(axis=0)
-            zeroed_dims = np.argsort(avg_magnitudes)[-zeroed_out_activation_dims:]
-
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-
-        if zeroed_dims is not None:
-            X_scaled = X_scaled.copy()
-            X_scaled[:, zeroed_dims] = 0.0
 
         lr_model = LogisticRegression(
             C=C,
@@ -155,7 +134,6 @@ class LRProbe:
             scaler.scale_,
             metadata,
             optimal_shrinkage,
-            zeroed_dims,
         )
 
     def refit(self, new_dataset, iterations) -> None:
@@ -174,10 +152,6 @@ class LRProbe:
 
         # Use the existing scaler to maintain feature consistency
         X_scaled = (X - self.scaler_mean) / self.scaler_scale
-
-        if self.zeroed_dims is not None:
-            X_scaled = X_scaled.copy()
-            X_scaled[:, self.zeroed_dims] = 0.0
 
         # Update max_iter for this specific run
         self.lr_model.max_iter = iterations
@@ -384,7 +358,6 @@ class MMProbe:
         biases: np.ndarray,
         classes: np.ndarray,
         metadata: dict[str, Any] | None = None,
-        zeroed_dims: np.ndarray | None = None,
         cov_inv: np.ndarray | None = None,
         means: np.ndarray | None = None,
     ) -> None:
@@ -397,7 +370,6 @@ class MMProbe:
             classes: Sorted array of the K class labels, aligned with `directions`.
             metadata: Optional dict with training metadata.
             optimal_shrinkage: Ledoit-Wolf shrinkage coefficient from training data.
-            zeroed_dims: Indices of activation dimensions zeroed out during training.
             cov_inv: Shared precision matrix Σ⁻¹ (d×d) used for Mahalanobis similarity.
             means: Per-class means μ_k (K×d), kept for reference/diagnostics.
         """
@@ -405,7 +377,6 @@ class MMProbe:
         self.biases = np.asarray(biases, dtype=np.float64)
         self.classes_ = np.asarray(classes)
         self.metadata = metadata
-        self.zeroed_dims: np.ndarray | None = zeroed_dims
         self.cov_inv: np.ndarray | None = cov_inv
         self.means: np.ndarray | None = means
 
@@ -421,9 +392,6 @@ class MMProbe:
         if isinstance(x, t.Tensor):
             x = x.float().cpu().numpy()
         x_arr = np.atleast_2d(x).astype(np.float64)
-        if self.zeroed_dims is not None:
-            x_arr = x_arr.copy()
-            x_arr[:, self.zeroed_dims] = 0.0
 
         W = np.asarray(self.directions, dtype=np.float64)  # (K, d)
         scores = x_arr @ W.T + self.biases  # (m, K)
@@ -431,13 +399,12 @@ class MMProbe:
         return self.classes_[pred_idx]
 
     @staticmethod
-    def create_from_data(dataset, zeroed_out_activation_dims: int = 0) -> "MMProbe":
+    def create_from_data(dataset) -> "MMProbe":
         """
         Create MMProbe from an activation dataset by computing mass-mean directions.
 
         Args:
             dataset: ActivationDataset with activations and labels.
-            zeroed_out_activation_dims: Number of highest-average-magnitude dims to zero out before training.
 
         Returns:
             Fitted MMProbe instance.
@@ -447,13 +414,6 @@ class MMProbe:
         # sensitive to precision, especially for large-magnitude late-layer activations.
         X = acts.cpu().float().numpy().astype(np.float64)
         y = labels.cpu().float().numpy().astype(int)
-
-        zeroed_dims: np.ndarray | None = None
-        if zeroed_out_activation_dims > 0:
-            avg_magnitudes = np.abs(X).mean(axis=0)
-            zeroed_dims = np.argsort(avg_magnitudes)[-zeroed_out_activation_dims:]
-            X = X.copy()
-            X[:, zeroed_dims] = 0.0
 
         classes = np.unique(y)  # sorted class labels, e.g. [0, 1, 2]
         K = len(classes)
@@ -502,7 +462,6 @@ class MMProbe:
             biases,
             classes,
             metadata,
-            zeroed_dims,
             cov_inv,
             means,
         )
@@ -646,38 +605,19 @@ def get_probe_filename(
     layer_num: int,
     probing_task: str,
     extra_iters: int = 0,
-    zeroed_out_activation_dims: int = 0,
     force_original_labels: bool = False,
 ) -> str:
     """Construct the filename for a saved probe, encoding all training options.
 
-    Optional suffixes are appended in order: extra_iters, zeroed_out_activation_dims,
-    and (for Japanese probes) orig_labels when force_original_labels is True.
+    Optional suffixes are appended in order: extra_iters, and (for Japanese probes)
+    orig_labels when force_original_labels is True.
     """
     name = f"{probe_type}_{language}_layer{layer_num}_{probing_task}"
     if extra_iters:
         name += f"_{extra_iters}_extra_iters"
-    if zeroed_out_activation_dims:
-        name += f"_{zeroed_out_activation_dims}_zeroed_act_dims"
     if force_original_labels and "jp" in language:
         name += "_orig_labels"
     return name + ".pkl"
-
-
-def apply_zeroed_weight_dims(probe: "AnyProbe", zeroed_out_weight_dims: int) -> None:
-    """Zero out the top-N highest-magnitude weight dimensions in a probe (per class/classifier)."""
-    if zeroed_out_weight_dims <= 0:
-        return
-    if isinstance(probe, LRProbe):
-        for i in range(probe.lr_model.coef_.shape[0]):
-            top_dims = np.argsort(np.abs(probe.lr_model.coef_[i]))[
-                -zeroed_out_weight_dims:
-            ]
-            probe.lr_model.coef_[i, top_dims] = 0.0
-    elif isinstance(probe, MMProbe):
-        for i in range(len(probe.directions)):
-            top_dims = np.argsort(np.abs(probe.directions[i]))[-zeroed_out_weight_dims:]
-            probe.directions[i][top_dims] = 0.0
 
 
 def save_probe(
@@ -688,7 +628,6 @@ def save_probe(
     probe_type: str,
     model_name: str,
     extra_iters: int = 0,
-    zeroed_out_activation_dims: int = 0,
     force_original_labels: bool = False,
 ) -> str:
     """
@@ -701,7 +640,6 @@ def save_probe(
         probing_task: Probing task name (e.g., 'standard')
         probe_type: Type of probe ('lr' or 'mm')
         model_name: Name of the model (e.g., 'olmo_model')
-        zeroed_out_activation_dims: Number of activation dims zeroed during training (affects filename).
 
     Returns:
         The path to the saved file
@@ -716,7 +654,6 @@ def save_probe(
         layer_num,
         probing_task,
         extra_iters,
-        zeroed_out_activation_dims,
         force_original_labels,
     )
     filepath: Path = save_dir / filename
@@ -749,8 +686,6 @@ def load_probe(
     probe_type: str,
     model_name: str,
     extra_iters: int = 0,
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
 ) -> AnyProbe:
     """
@@ -762,8 +697,6 @@ def load_probe(
         probing_task: Probing task name (e.g., 'standard')
         probe_type: Type of probe ('lr' or 'mm')
         model_name: Name of the model (e.g., 'olmo_model')
-        zeroed_out_activation_dims: Must match the value used when the probe was saved.
-        zeroed_out_weight_dims: If > 0, zero out this many highest-magnitude weight dims per class after loading.
         force_original_labels: If True and language contains 'jp', loads the probe trained with original (non-Japanese) labels.
 
     Returns:
@@ -776,15 +709,12 @@ def load_probe(
         layer_num,
         probing_task,
         extra_iters,
-        zeroed_out_activation_dims,
         force_original_labels,
     )
     filepath: Path = Path(PROBES_FOLDER) / model_name / subfolder / filename
 
     with open(filepath, "rb") as f:
         probe = pickle.load(f)
-
-    apply_zeroed_weight_dims(probe, zeroed_out_weight_dims)
 
     return probe
 
@@ -796,7 +726,6 @@ def probe_exists(
     probe_type: str,
     model_name: str,
     extra_iters: int = 0,
-    zeroed_out_activation_dims: int = 0,
     force_original_labels: bool = False,
 ) -> bool:
     """
@@ -808,7 +737,6 @@ def probe_exists(
         probing_task: Probing task name (e.g., 'standard')
         probe_type: Type of probe ('lr' or 'mm')
         model_name: Name of the model (e.g., 'olmo_model')
-        zeroed_out_activation_dims: Must match the value used when the probe was saved.
         force_original_labels: If True and language contains 'jp', checks for the probe trained with original labels.
 
     Returns:
@@ -821,7 +749,6 @@ def probe_exists(
         layer_num,
         probing_task,
         extra_iters,
-        zeroed_out_activation_dims,
         force_original_labels,
     )
     filepath: Path = Path(PROBES_FOLDER) / model_name / subfolder / filename
@@ -837,8 +764,6 @@ def get_probe(
     model_name: str,
     activation_dataset_train=None,
     force_probe_creation: bool = False,
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
 ) -> AnyProbe:
     """Load a probe from disk or create, save, and return a new one.
@@ -848,9 +773,6 @@ def get_probe(
     `activation_dataset_train`, saved, and returned.
 
     LR probes always use C=0.01, fit_intercept=True.
-
-    `zeroed_out_weight_dims` is applied after loading or training and is not
-    encoded in the filename, so it does not affect the cached probe on disk.
     """
     if (not force_probe_creation) and (
         probe_exists(
@@ -859,7 +781,6 @@ def get_probe(
             probing_task,
             probe_type,
             model_name,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
             force_original_labels=force_original_labels,
         )
     ):
@@ -869,8 +790,6 @@ def get_probe(
             probing_task,
             probe_type,
             model_name,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
-            zeroed_out_weight_dims=zeroed_out_weight_dims,
             force_original_labels=force_original_labels,
         )
     else:
@@ -891,16 +810,13 @@ def get_probe(
                     activation_dataset_train,
                     C,
                     fit_intercept,
-                    zeroed_out_activation_dims,
                 )
             case "mm":
                 if activation_dataset_train is None:
                     raise ValueError(
                         "activation_dataset_train must be specified in order to create a probe"
                     )
-                probe = MMProbe.create_from_data(
-                    activation_dataset_train, zeroed_out_activation_dims
-                )
+                probe = MMProbe.create_from_data(activation_dataset_train)
             case _:
                 raise KeyError(
                     f"Probe '{probe_type}' does not exist. Valid types: {list(PROBE_TYPE_SUBFOLDERS)}"
@@ -913,9 +829,7 @@ def get_probe(
             probing_task,
             probe_type,
             model_name,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
             force_original_labels=force_original_labels,
         )
-        apply_zeroed_weight_dims(probe, zeroed_out_weight_dims)
 
     return probe

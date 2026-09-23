@@ -120,8 +120,6 @@ def calculate_per_layer_sims_between_langs(
     sim_func: str = "cos_sim",
     extra_iters: int = 0,
     probe_type: str = "lr",
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     normalise_l2: bool = True,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
@@ -139,8 +137,6 @@ def calculate_per_layer_sims_between_langs(
                 probe_type,
                 model_name,
                 extra_iters=extra_iters,
-                zeroed_out_activation_dims=zeroed_out_activation_dims,
-                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
             probe_b: AnyProbe = load_probe(
                 language_b,
@@ -149,8 +145,6 @@ def calculate_per_layer_sims_between_langs(
                 probe_type,
                 model_name,
                 extra_iters=extra_iters,
-                zeroed_out_activation_dims=zeroed_out_activation_dims,
-                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
             sim_method = get_similarity_function(probe_a, sim_func, normalise_l2)
@@ -181,8 +175,6 @@ def calculate_per_layer_sims_over_extra_iters(
     per_class: bool,
     sim_func: str = "cos_sim",
     probe_type: str = "lr",
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     normalise_l2: bool = True,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
@@ -200,8 +192,6 @@ def calculate_per_layer_sims_over_extra_iters(
             probe_type,
             model_name,
             0,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
-            zeroed_out_weight_dims=zeroed_out_weight_dims,
         )
 
         for refit_num in range(1, num_refits + 1):
@@ -215,8 +205,6 @@ def calculate_per_layer_sims_over_extra_iters(
                 probe_type,
                 model_name,
                 extra_iters,
-                zeroed_out_activation_dims=zeroed_out_activation_dims,
-                zeroed_out_weight_dims=zeroed_out_weight_dims,
             )
 
             sim_method = get_similarity_function(original_probe, sim_func, normalise_l2)
@@ -268,8 +256,6 @@ def plot_probe_weight_magnitudes(
     extra_iters: int = 0,
     save: bool = False,
     show: bool = True,
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
 ) -> None:
     probe: AnyProbe = load_probe(
         language,
@@ -278,8 +264,6 @@ def plot_probe_weight_magnitudes(
         probe_type,
         model_name,
         extra_iters,
-        zeroed_out_activation_dims=zeroed_out_activation_dims,
-        zeroed_out_weight_dims=zeroed_out_weight_dims,
     )
 
     weights = probe.get_vector(per_class=True)  # shape (n_classes, n_features+1)
@@ -301,10 +285,6 @@ def plot_probe_weight_magnitudes(
     title = f"Weight magnitudes of {probe_type} probe for {model_name} {language} layer {layer_num} {probing_task}"
     if extra_iters:
         title += f" ({extra_iters} extra iters)"
-    if zeroed_out_activation_dims:
-        title += f" zad={zeroed_out_activation_dims}"
-    if zeroed_out_weight_dims:
-        title += f" zwd={zeroed_out_weight_dims}"
     fig.suptitle(title, fontsize=14, fontweight="bold")
     plt.tight_layout()
 
@@ -504,8 +484,6 @@ def calculate_between_layers_sims(
     per_class: bool,
     sim_func: str = "cos_sim",
     probe_type: str = "lr",
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     normalise_l2: bool = True,
 ) -> dict[int, dict[str, float]]:
     """
@@ -521,8 +499,6 @@ def calculate_between_layers_sims(
             probing_task,
             probe_type,
             model_name,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
-            zeroed_out_weight_dims=zeroed_out_weight_dims,
         )
         for layer_num in range(num_layers)
     }
@@ -665,8 +641,6 @@ def _save_layerwise_similarity_dataframe(
     probe_type: str,
     extra_iters: int,
     per_class: bool,
-    zeroed_out_activation_dims: int,
-    zeroed_out_weight_dims: int,
     normalise_l2: bool,
 ) -> Path:
     output_dir = (
@@ -681,8 +655,6 @@ def _save_layerwise_similarity_dataframe(
         _sanitize_experiment_value(probe_type),
         f"extra_iters_{extra_iters}",
         f"per_class_{str(per_class).lower()}",
-        f"zact_{zeroed_out_activation_dims}",
-        f"zw_{zeroed_out_weight_dims}",
         f"normalise_l2_{str(normalise_l2).lower()}",
     ]
     filepath = output_dir / ("_".join(filename_parts) + ".csv")
@@ -1095,18 +1067,6 @@ if __name__ == "__main__":
         choices=["lr", "mm"],
     )
     parser.add_argument(
-        "-zad",
-        help="number of highest-magnitude activation dims zeroed during probe training (0 = disabled)",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "-zwd",
-        help="number of highest-magnitude weight dims to zero out per class after loading (0 = disabled)",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
         "-n",
         help="whether to normalise L2 distance (only applies to lr probes)",
         nargs="?",
@@ -1130,15 +1090,7 @@ if __name__ == "__main__":
     per_class: bool = args.pc.lower() == "true"
     sim_func: str = args.sf
     probe_type: str = args.pt
-    zeroed_out_activation_dims: int = args.zad
-    zeroed_out_weight_dims: int = args.zwd
     normalise_l2: bool = args.n.lower() == "true" and probe_type == "lr"
-
-    zeroing_suffix: str = ""
-    if zeroed_out_activation_dims:
-        zeroing_suffix += f" zad={zeroed_out_activation_dims}"
-    if zeroed_out_weight_dims:
-        zeroing_suffix += f" zwd={zeroed_out_weight_dims}"
 
     if extra_iter_nums != [0] and experiment_type not in (
         "per_layer",
@@ -1175,8 +1127,6 @@ if __name__ == "__main__":
                             sim_func=sim_func,
                             extra_iters=extra_iters,
                             probe_type=probe_type,
-                            zeroed_out_activation_dims=zeroed_out_activation_dims,
-                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                             normalise_l2=normalise_l2,
                         )
                     )
@@ -1220,7 +1170,7 @@ if __name__ == "__main__":
                     plot_sim_over_the_layers(
                         sims,
                         language_pairs,
-                        f"{metric_name} over layers for {model_name} {probing_task} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}{zeroing_suffix}",
+                        f"{metric_name} over layers for {model_name} {probing_task} {probe_type} probes of different language pairs refitted for {extra_iters} iterations with per_class={per_class}",
                         save,
                         show,
                         per_class,
@@ -1262,8 +1212,6 @@ if __name__ == "__main__":
                             sim_func="cos_sim",
                             extra_iters=extra_iters,
                             probe_type=probe_type,
-                            zeroed_out_activation_dims=zeroed_out_activation_dims,
-                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                         )
                     )
                     sims_l2: dict[int, dict[int, dict[Any, float]]] = (
@@ -1276,8 +1224,6 @@ if __name__ == "__main__":
                             sim_func="l2_dist",
                             extra_iters=extra_iters,
                             probe_type=probe_type,
-                            zeroed_out_activation_dims=zeroed_out_activation_dims,
-                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                             normalise_l2=normalise_l2,
                         )
                     )
@@ -1293,8 +1239,6 @@ if __name__ == "__main__":
                         probe_type=probe_type,
                         extra_iters=extra_iters,
                         per_class=per_class,
-                        zeroed_out_activation_dims=zeroed_out_activation_dims,
-                        zeroed_out_weight_dims=zeroed_out_weight_dims,
                         normalise_l2=normalise_l2,
                     )
                     l2_csv_path = _save_layerwise_similarity_dataframe(
@@ -1305,8 +1249,6 @@ if __name__ == "__main__":
                         probe_type=probe_type,
                         extra_iters=extra_iters,
                         per_class=per_class,
-                        zeroed_out_activation_dims=zeroed_out_activation_dims,
-                        zeroed_out_weight_dims=zeroed_out_weight_dims,
                         normalise_l2=normalise_l2,
                     )
                     print(f"Saved cosine similarity dataframe to {cos_csv_path}")
@@ -1354,8 +1296,6 @@ if __name__ == "__main__":
                             per_class,
                             sim_func,
                             probe_type=probe_type,
-                            zeroed_out_activation_dims=zeroed_out_activation_dims,
-                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                             normalise_l2=normalise_l2,
                         )
                     )
@@ -1373,7 +1313,7 @@ if __name__ == "__main__":
                     #     plot_sim_over_extra_iters(
                     #         sims,
                     #         layer_nums_to_plot,
-                    #         f"{metric_name} over extra iters for {probe_type} {probing_task} probes of {model_name} on the {probing_task} {language_pair} task at different layers with per_class={per_class}{zeroing_suffix}",
+                    #         f"{metric_name} over extra iters for {probe_type} {probing_task} probes of {model_name} on the {probing_task} {language_pair} task at different layers with per_class={per_class}",
                     #         save,
                     #         show,
                     #         per_class,
@@ -1407,7 +1347,7 @@ if __name__ == "__main__":
                 plot_sim_over_layers_at_max_iters(
                     sims_per_model_per_pair,
                     max_extra_iters,
-                    # f"{metric_name_new} after {max_extra_iters} iters over layers for {probing_task} {PROBE_TYPE_FULL_NAME_MAP[probe_type]} probes{f' with per_class=True{zeroing_suffix}' if per_class else ''}",
+                    # f"{metric_name_new} after {max_extra_iters} iters over layers for {probing_task} {PROBE_TYPE_FULL_NAME_MAP[probe_type]} probes{' with per_class=True' if per_class else ''}",
                     "",
                     save,
                     show,
@@ -1449,8 +1389,6 @@ if __name__ == "__main__":
                             per_class,
                             sim_func,
                             probe_type=probe_type,
-                            zeroed_out_activation_dims=zeroed_out_activation_dims,
-                            zeroed_out_weight_dims=zeroed_out_weight_dims,
                             normalise_l2=normalise_l2,
                         )
                     )
@@ -1472,7 +1410,7 @@ if __name__ == "__main__":
 
                     plot_between_layers_confusion_matrix(
                         sims_between,
-                        f"{metric_name} between layers for {model_name} {language} {probing_task} {probe_type} probes with per_class={per_class}{zeroing_suffix}",
+                        f"{metric_name} between layers for {model_name} {language} {probing_task} {probe_type} probes with per_class={per_class}",
                         save,
                         show,
                         per_class,
@@ -1495,8 +1433,6 @@ if __name__ == "__main__":
                                 probing_task,
                                 probe_type,
                                 extra_iters,
-                                zeroed_out_activation_dims=zeroed_out_activation_dims,
-                                zeroed_out_weight_dims=zeroed_out_weight_dims,
                             )
     else:
         raise ValueError(

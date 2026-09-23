@@ -24,8 +24,6 @@ def run_full_experiment_1(
     model_name: str,
     force_probe_creation: bool,
     num_layers: int | None,
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
 ) -> ExperimentResult:
     """
@@ -51,8 +49,6 @@ def run_full_experiment_1(
         probing_task,
         probe_type,
         model_name,
-        zeroed_out_activation_dims=zeroed_out_activation_dims,
-        zeroed_out_weight_dims=zeroed_out_weight_dims,
         force_original_labels=force_original_labels,
     )
 
@@ -96,8 +92,6 @@ def run_full_experiment_1(
             model_name,
             activation_dataset_train=activation_dataset_train,
             force_probe_creation=force_probe_creation,
-            zeroed_out_activation_dims=zeroed_out_activation_dims,
-            zeroed_out_weight_dims=zeroed_out_weight_dims,
             force_original_labels=force_original_labels,
         )
 
@@ -160,8 +154,6 @@ def _run_experiment_1_combination(
         params["model_name"],
         params["force_probe_creation"],
         params["num_layers"],
-        params["zeroed_out_activation_dims"],
-        params["zeroed_out_weight_dims"],
         params["force_original_labels"],
     )
 
@@ -173,8 +165,6 @@ def _run_experiment_1_combination(
         params["model_name"],
         params["force_probe_creation"],
         params["num_layers"],
-        params["zeroed_out_activation_dims"],
-        params["zeroed_out_weight_dims"],
         params["force_original_labels"],
     )
 
@@ -193,8 +183,6 @@ def run_experiment_1(
     force_probe_creation: bool,
     save_results: bool = True,
     num_layers: int | None = None,
-    zeroed_out_activation_dims: int = 0,
-    zeroed_out_weight_dims: int = 0,
     force_original_labels: bool = False,
     num_workers: int | None = None,
 ) -> list[ExperimentResult]:
@@ -225,8 +213,6 @@ def run_experiment_1(
             "probe_type": probe_type,
             "force_probe_creation": force_probe_creation,
             "num_layers": num_layers,
-            "zeroed_out_activation_dims": zeroed_out_activation_dims,
-            "zeroed_out_weight_dims": zeroed_out_weight_dims,
             "force_original_labels": force_original_labels,
         }
         for model_name in model_names
@@ -276,18 +262,6 @@ if __name__ == "__main__":
         const="True",
     )
     parser.add_argument(
-        "-zad",
-        help="number of highest-magnitude activation dims to zero out before training (0 = disabled)",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "-zwd",
-        help="number of highest-magnitude weight dims to zero out per class after loading (0 = disabled)",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
         "-fol",
         help="force original (non-Japanese) labels for Japanese data",
         nargs="?",
@@ -310,8 +284,6 @@ if __name__ == "__main__":
     num_layers: int | None = args.nl
     force_probe_creation: bool = args.f.lower() == "true"
     save_results: bool = args.sr.lower() == "true"
-    zeroed_out_activation_dims: int = args.zad
-    zeroed_out_weight_dims: int = args.zwd
     force_original_labels: bool = args.fol.lower() == "true"
     num_workers: int = args.j
 
@@ -324,8 +296,6 @@ if __name__ == "__main__":
         force_probe_creation,
         num_layers=num_layers,
         save_results=save_results,
-        zeroed_out_activation_dims=zeroed_out_activation_dims,
-        zeroed_out_weight_dims=zeroed_out_weight_dims,
         force_original_labels=force_original_labels,
         num_workers=num_workers,
     )

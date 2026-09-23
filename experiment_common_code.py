@@ -41,8 +41,6 @@ class ExperimentResult:
         probe_type: str,
         model_name: str,
         extra_iter_num: int = 0,
-        zeroed_out_activation_dims: int = 0,
-        zeroed_out_weight_dims: int = 0,
         force_original_labels: bool = False,
     ) -> None:
         """
@@ -58,8 +56,6 @@ class ExperimentResult:
         self.probe_type: str = probe_type
         self.model_name: str = model_name
         self.extra_iter_num: int = extra_iter_num
-        self.zeroed_out_activation_dims: int = zeroed_out_activation_dims
-        self.zeroed_out_weight_dims: int = zeroed_out_weight_dims
         self.force_original_labels: bool = force_original_labels
 
         match experiment_number:
@@ -439,8 +435,6 @@ class ExperimentResult:
             self.probe_type,
             self.model_name,
             self.extra_iter_num,
-            self.zeroed_out_activation_dims,
-            self.zeroed_out_weight_dims,
             self.force_original_labels,
         )
         with open(filepath, "wb") as f:
@@ -469,8 +463,6 @@ class ExperimentResult:
         probe_type: str,
         model_name: str,
         extra_iter_num: int,
-        zeroed_out_activation_dims: int = 0,
-        zeroed_out_weight_dims: int = 0,
         force_original_labels: bool = False,
     ) -> str:
         """Generate filename based on experiment parameters."""
@@ -478,10 +470,6 @@ class ExperimentResult:
         suffixes = []
         if extra_iter_num:
             suffixes.append(f"{extra_iter_num}_extra_iters")
-        if zeroed_out_activation_dims:
-            suffixes.append(f"{zeroed_out_activation_dims}_zeroed_act_dims")
-        if zeroed_out_weight_dims:
-            suffixes.append(f"{zeroed_out_weight_dims}_zeroed_wt_dims")
         if force_original_labels and "jp" in language:
             suffixes.append("orig_labels")
         if suffixes:
@@ -496,8 +484,6 @@ class ExperimentResult:
         probe_type: str,
         model_name: str,
         extra_iter_num: int = 0,
-        zeroed_out_activation_dims: int = 0,
-        zeroed_out_weight_dims: int = 0,
         force_original_labels: bool = False,
     ) -> "ExperimentResult":
         """
@@ -506,7 +492,7 @@ class ExperimentResult:
         Returns:
             The loaded ExperimentResult object
         """
-        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num, zeroed_out_activation_dims, zeroed_out_weight_dims, force_original_labels)}"
+        filepath = f"{EXPERIMENT_RESULTS_FOLDER}/experiment_{experiment_number}/{ExperimentResult.get_filename(language, probing_task, probe_type, model_name, extra_iter_num, force_original_labels)}"
         with open(filepath, "rb") as f:
             return pickle.load(f)
 
@@ -593,8 +579,6 @@ def show_plots(
     save: bool = False,
     filename: str = "",
     legend_position="upper left",
-    zeroed_out_activation_dims_list: list[int] = [0],
-    zeroed_out_weight_dims_list: list[int] = [0],
     horizontal_line: str | int = "",
     subplot_titles: list[str] | None = None,
     as_bars: bool = True,
@@ -620,15 +604,12 @@ def show_plots(
         metric: Metric key to retrieve from ExperimentResult.
         separate_chars_within_plot: Characteristics that vary within a single subplot.
             Valid values: "model_name", "split", "class_name", "language" (or "language_a"
-            / "language_b"), "probing_task", "extra_iter_num",
-            "zeroed_out_activation_dims", "zeroed_out_weight_dims".
+            / "language_b"), "probing_task", "extra_iter_num".
         y_axis_range: Fixed (min, max) y-axis range; auto-computed if None.
         show: Whether to call plt.show().
         save: Whether to save the figure to disk (requires filename).
         filename: Output filename (required when save=True).
         legend_position: Legend location string passed to matplotlib.
-        zeroed_out_activation_dims_list: Ablation values for zeroed activation dims.
-        zeroed_out_weight_dims_list: Ablation values for zeroed weight dims.
         horizontal_line: Draw a horizontal reference line. Pass a numeric value,
             "baseline_f1", or "control_average".
         subplot_titles: Override auto-generated subplot titles; pass [] to suppress all.
@@ -671,8 +652,6 @@ def show_plots(
         "language_b",
         "probing_task",
         "extra_iter_num",
-        "zeroed_out_activation_dims",
-        "zeroed_out_weight_dims",
     }
 
     for char in separate_chars_within_plot:
@@ -707,8 +686,6 @@ def show_plots(
             "language_b",
             "probing_task",
             "extra_iter_num",
-            "zeroed_out_activation_dims",
-            "zeroed_out_weight_dims",
         ]
     else:
         valid_characteristics = [
@@ -718,8 +695,6 @@ def show_plots(
             "language",
             "probing_task",
             "extra_iter_num",
-            "zeroed_out_activation_dims",
-            "zeroed_out_weight_dims",
         ]
 
     separate_chars_outside_plot: list[str] = [
@@ -735,8 +710,6 @@ def show_plots(
         language_key,
         probing_task,
         extra_iter_num,
-        zeroed_out_activation_dims,
-        zeroed_out_weight_dims,
     ) in product(
         model_names,
         splits,
@@ -744,8 +717,6 @@ def show_plots(
         languages,
         probing_tasks,
         extra_iter_nums,
-        zeroed_out_activation_dims_list,
-        zeroed_out_weight_dims_list,
     ):
         if class_id in extended_class_names.keys():
             class_name: str = extended_class_names[class_id]
@@ -764,8 +735,6 @@ def show_plots(
             "force_original_labels": force_original_labels,
             "probing_task": probing_task,
             "extra_iter_num": extra_iter_num,
-            "zeroed_out_activation_dims": zeroed_out_activation_dims,
-            "zeroed_out_weight_dims": zeroed_out_weight_dims,
         }
 
         if use_language_split:
@@ -790,8 +759,6 @@ def show_plots(
             probe_type,
             combo["model_name"],
             combo["extra_iter_num"],
-            combo["zeroed_out_activation_dims"],
-            combo["zeroed_out_weight_dims"],
             combo["force_original_labels"],
         )
 
@@ -1092,8 +1059,6 @@ def plot_metrics_by_group(
         "probe_type",
         "model_name",
         "extra_iter_num",
-        "zeroed_out_activation_dims",
-        "zeroed_out_weight_dims",
         "split",
         "metric",
     ]
@@ -1125,12 +1090,6 @@ def plot_metrics_by_group(
                 "probe_type": exp_result.probe_type,
                 "model_name": exp_result.model_name,
                 "extra_iter_num": str(exp_result.extra_iter_num),
-                "zeroed_out_activation_dims": str(
-                    getattr(exp_result, "zeroed_out_activation_dims", 0)
-                ),
-                "zeroed_out_weight_dims": str(
-                    getattr(exp_result, "zeroed_out_weight_dims", 0)
-                ),
                 "split": split,
                 "metric": metric,
                 "label": class_name,
@@ -1475,8 +1434,6 @@ def plot_metrics_by_group_as_bars(
         "probe_type",
         "model_name",
         "extra_iter_num",
-        "zeroed_out_activation_dims",
-        "zeroed_out_weight_dims",
         "split",
         "metric",
     ]
@@ -1548,12 +1505,6 @@ def plot_metrics_by_group_as_bars(
                 "probe_type": exp_result.probe_type,
                 "model_name": exp_result.model_name,
                 "extra_iter_num": str(exp_result.extra_iter_num),
-                "zeroed_out_activation_dims": str(
-                    getattr(exp_result, "zeroed_out_activation_dims", 0)
-                ),
-                "zeroed_out_weight_dims": str(
-                    getattr(exp_result, "zeroed_out_weight_dims", 0)
-                ),
                 "split": line_request["split"],
                 "metric": metric,
                 "label": line_request["class_name"],
