@@ -118,13 +118,16 @@ def calculate_per_layer_sims_between_langs(
     extra_iters: int = 0,
     probe_type: str = "lr",
     normalise_l2: bool = True,
+    num_layers: int | None = None,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
     language_pairs: list[tuple[str, str]] = get_language_pair_permutations(languages)
     print(language_pairs)
-    num_layers: int = get_number_of_layers_from_file(model_name)
-    for layer_num in range(num_layers):
+    layers: list[int] = list(range(get_number_of_layers_from_file(model_name)))
+    if num_layers is not None:
+        layers = layers[:num_layers]
+    for layer_num in layers:
         sims[layer_num] = {}
         for language_a, language_b in language_pairs:
             probe_a: AnyProbe = load_probe(
@@ -173,12 +176,15 @@ def calculate_per_layer_sims_over_extra_iters(
     sim_func: str = "cos_sim",
     probe_type: str = "lr",
     normalise_l2: bool = True,
+    num_layers: int | None = None,
 ) -> dict[int, dict[int, dict[Any, float]]]:
     sims: dict[int, dict[int, dict[Any, float]]] = {}
 
-    num_layers: int = get_number_of_layers_from_file(model_name)
+    layers: list[int] = list(range(get_number_of_layers_from_file(model_name)))
+    if num_layers is not None:
+        layers = layers[:num_layers]
 
-    for layer_num in range(num_layers):
+    for layer_num in layers:
         sims[layer_num] = {}
 
         # Get original probe trained on language a
@@ -482,12 +488,15 @@ def calculate_between_layers_sims(
     sim_func: str = "cos_sim",
     probe_type: str = "lr",
     normalise_l2: bool = True,
+    num_layers: int | None = None,
 ) -> dict[int, dict[str, float]]:
     """
     Calculate similarities between probes at each pair of layers for a single language.
     Returns: {class_num: {f"{layer_a},{layer_b}": similarity}}
     """
-    num_layers: int = get_number_of_layers_from_file(model_name)
+    layers: list[int] = list(range(get_number_of_layers_from_file(model_name)))
+    if num_layers is not None:
+        layers = layers[:num_layers]
 
     probes: dict[int, AnyProbe] = {
         layer_num: load_probe(
@@ -497,13 +506,13 @@ def calculate_between_layers_sims(
             probe_type,
             model_name,
         )
-        for layer_num in range(num_layers)
+        for layer_num in layers
     }
 
     sims: dict[int, dict[str, float]] = {}
 
-    for layer_a in range(num_layers):
-        for layer_b in range(num_layers):
+    for layer_a in layers:
+        for layer_b in layers:
             if layer_a == layer_b:
                 continue
             sim_method = get_similarity_function(
@@ -1093,6 +1102,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("-nr", help="number of refits", type=int, default=1)
     parser.add_argument("-ir", help="iterations per refit", type=int, default=2)
+    parser.add_argument(
+        "-nl", help="number of layers (None = all)", type=int, default=None
+    )
 
     args: argparse.Namespace = parser.parse_args()
     print(args)
@@ -1109,6 +1121,7 @@ if __name__ == "__main__":
     sim_func: str = args.sf
     probe_type: str = args.pt
     normalise_l2: bool = args.n.lower() == "true" and probe_type == "lr"
+    num_layers: int | None = args.nl
 
     if extra_iter_nums != [0] and experiment_type not in (
         "per_layer",
@@ -1146,6 +1159,7 @@ if __name__ == "__main__":
                             extra_iters=extra_iters,
                             probe_type=probe_type,
                             normalise_l2=normalise_l2,
+                            num_layers=num_layers,
                         )
                     )
 
@@ -1208,6 +1222,7 @@ if __name__ == "__main__":
                             sim_func="cos_sim",
                             extra_iters=extra_iters,
                             probe_type=probe_type,
+                            num_layers=num_layers,
                         )
                     )
                     sims_l2: dict[int, dict[int, dict[Any, float]]] = (
@@ -1221,6 +1236,7 @@ if __name__ == "__main__":
                             extra_iters=extra_iters,
                             probe_type=probe_type,
                             normalise_l2=normalise_l2,
+                            num_layers=num_layers,
                         )
                     )
 
@@ -1302,6 +1318,7 @@ if __name__ == "__main__":
                             sim_func,
                             probe_type=probe_type,
                             normalise_l2=normalise_l2,
+                            num_layers=num_layers,
                         )
                     )
 
@@ -1381,6 +1398,7 @@ if __name__ == "__main__":
                             sim_func,
                             probe_type=probe_type,
                             normalise_l2=normalise_l2,
+                            num_layers=num_layers,
                         )
                     )
 
@@ -1413,8 +1431,12 @@ if __name__ == "__main__":
     elif experiment_type == "weight_magnitudes":
         for language in languages:
             for model_name in model_names:
-                layer_nums: int = get_number_of_layers_from_file(model_name)
-                for layer_num in range(layer_nums):
+                layer_nums: list[int] = list(
+                    range(get_number_of_layers_from_file(model_name))
+                )
+                if num_layers is not None:
+                    layer_nums = layer_nums[:num_layers]
+                for layer_num in layer_nums:
                     for probing_task in probing_tasks:
                         for extra_iters in extra_iter_nums:
                             plot_probe_weight_magnitudes(
